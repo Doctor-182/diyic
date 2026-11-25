@@ -1310,6 +1310,8 @@
     els.btnTts = $("#btnTts"); els.ttsOut = $("#ttsOut");
     els.ocrX = $("#ocrX"); els.ocrY = $("#ocrY"); els.ocrW = $("#ocrW"); els.ocrH = $("#ocrH");
     els.ocrOut = $("#ocrOut");
+    els.keyVal = $("#keyVal"); els.keyHost = $("#keyHost"); els.keyState = $("#keyState");
+    els.keyOut = $("#keyOut"); els.btnKeySave = $("#btnKeySave");
     els.sysPid = $("#sysPid"); els.sysVer = $("#sysVer"); els.sysUp = $("#sysUp"); els.sysHud = $("#sysHud");
     els.sysDanmaku = $("#sysDanmaku"); els.danmHint = $("#danmHint");
     els.sysMic = $("#sysMic");
@@ -1390,6 +1392,41 @@
       });
       els.speed.addEventListener("change", function () {
         if (!st.speedKb && !st.demo) log("warn", "后端没有 speed 字段，语速只会随试听请求一起发");
+      });
+    }
+
+
+    // 密钥：安装版里唯一必须手填的东西，写 %LOCALAPPDATA%\VRDub\config\.env.local
+    function renderKey(j) {
+      if (!j) return;
+      if (els.keyState) {
+        setTx(els.keyState, j.has_key ? ("已配置 …" + (j.tail || "") + (j.probe === "ok" ? " · 自检正常" : (j.probe === "fail" ? " · 自检失败" : ""))) : "未配置 · 云端功能不可用");
+        els.keyState.dataset.state = j.has_key ? (j.probe === "fail" ? "warn" : "ok") : "err";
+      }
+      if (els.keyHost && !els.keyHost.value && j.host) els.keyHost.value = j.host;
+    }
+    function loadKey() {
+      if (st.demo) return;
+      apiGet("/api/env").then(function (j) { renderKey(j); });
+    }
+    if (els.btnKeySave) {
+      els.btnKeySave.addEventListener("click", function () {
+        var key = (els.keyVal && els.keyVal.value || "").trim();
+        var host = (els.keyHost && els.keyHost.value || "").trim();
+        if (!key && !host) { log("warn", "密钥为空，没保存"); return; }
+        els.btnKeySave.disabled = true;
+        if (els.keyOut) setTx(els.keyOut, "保存并自检中…");
+        postJson("/api/env", { key: key, host: host }).then(function (j) {
+          els.btnKeySave.disabled = false;
+          if (els.keyVal) els.keyVal.value = "";
+          renderKey(j);
+          if (els.keyOut) setTx(els.keyOut, j.has_key ? ("已写入 " + (j.path || "配置目录") + (j.probe === "ok" ? " · 自检通过" : (j.probe === "fail" ? " · 自检失败，看日志" : ""))) : "没写进去，看日志");
+          log(j.probe === "fail" ? "err" : "info", "密钥已保存 · 自检 " + (j.probe || "未测"));
+        }).catch(function (e) {
+          els.btnKeySave.disabled = false;
+          if (els.keyOut) setTx(els.keyOut, "保存失败：" + e.message);
+          log("err", "保存密钥失败：" + e.message);
+        });
       });
     }
 
@@ -1585,6 +1622,7 @@
         connectSSE();
         startMetricsPoll();
         pollMetrics();
+        loadKey();
         if (st.autoInject && els.btnInject) {
           log("info", "自测模式：2 秒后自动按一次「回环自测」");
           setTimeout(function () { els.btnInject.click(); }, 2000);

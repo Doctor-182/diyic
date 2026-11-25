@@ -302,5 +302,23 @@ run.bat
 
 **他的配置与他自己的 key**：默认读 `%LOCALAPPDATA%\VRDub\config\`，跟我们本机完全隔离；他的设备序号、他的 key、他的日志都在他自己的用户目录里，不会串。
 
-**后续软件化**：PyInstaller onedir + Inno Setup 安装包（自带 `.runtime` Python 与依赖，朋友不需要装 Python），路线见 `docs/软件化路线.md`。
+## 9. 打成安装包（给朋友的那种）
+
+`scripts\打包.bat` 一次做完三件事：PyInstaller onedir → 复制模型 → Inno Setup 出安装包。产物 `dist\installer\VRDub-<版本>-setup.exe`。
+
+| 项 | 实测值 |
+| --- | --- |
+| 安装包 | **264.5 MB**（lzma2/max 压缩，耗时约 3.5 min） |
+| 装完占地 | **591 MB**（程序 + `_internal` + 内置模型 252.7 MB） |
+| 首次启动 | 3–5 s 载入 SenseVoice，随后 `/api/health` 就绪 |
+| 装在哪 | `%LOCALAPPDATA%\Programs\VRDub`（默认，可选） |
+| 用户数据 | `%LOCALAPPDATA%\VRDub\`，卸载时问一句要不要一起删 |
+
+**安装包里有什么**：`VRDub.exe`（同目录 `_internal\` 是 Python 3.12 与 8 个依赖）、`models\` 里识别的 8 个权重、网页控制台、图标与版本资源。朋友不需要装 Python、不需要配 `PYTHONPATH`、不需要 `pip`。
+
+**安装包里没有什么**：任何密钥。装完第一次开要填一次 key（网页控制台底部「密钥」卡，粘贴 + 保存 → 自动写进 `%LOCALAPPDATA%\VRDub\config\.env.local` 并当场自检 HTTP 200）。
+
+**子进程怎么起**：`hud / danmaku / ocr_overlay / region_picker` 都是同一个 `VRDub.exe --child <名字>` 再进来一次（`vrdub/child.py`），所以打包后不会有「找不到 python.exe」也不会闪黑框。
+
+**改代码之后怎么重打**：`scripts\打包.bat`（会先删旧的 `dist\exe`）。只想看界面就 `run.bat` 跑源码，两条路共用同一套用户目录。
 

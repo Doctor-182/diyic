@@ -91,6 +91,17 @@ class Net:
         except Exception:
             pass
 
+    def reset(self, host=None, key=None):
+        """换端点/换密钥后把空闲连接全丢掉（旧连接还连着老 host，不能复用）。"""
+        if host:
+            self.host = host
+        if key is not None:
+            self.key = key
+        with self._lk:
+            idle, self._idle = self._idle, []
+        for it in idle:
+            self._drop(it)
+
     def _headers(self, extra=None):
         h = {"Authorization": "Bearer " + self.key, "Content-Type": "application/json"}
         if extra:

@@ -14,6 +14,11 @@
 - **闭麦** CapsLock 一键静音，浮窗右上角红字提示。
 - 网页控制台（SSE 实时曲线 + 全部参数热改），无需构建步骤。
 
+### 交付（打包成软件）
+- **安装包**：PyInstaller onedir + Inno Setup，单文件 installer 264.5 MB，装完 591 MB，内置 252.7 MB 识别模型；朋友双击装完即可运行，不需要 Python / pip / PYTHONPATH。
+- **密钥面板**：网页控制台底部填 key → 写 `%LOCALAPPDATA%\VRDub\config\.env.local` 并当场自检；exe 与仓库里永远没有 key。
+- **子进程调度**：hud / 弹幕 / OCR 浮窗统一走 `VRDub.exe --child <名字>`，打包后不闪黑框、不依赖外部 python。
+
 ### 工程
 - 配置与日志搬到 `%LOCALAPPDATA%\VRDub\`（config / logs / cache / out / recordings），程序目录只读也能跑；老配置首次启动自动迁移。
 - 依赖与模型路径全部相对程序目录，不再引用任何本机绝对路径。

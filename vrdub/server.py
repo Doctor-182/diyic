@@ -92,6 +92,8 @@ class H(BaseHTTPRequestHandler):
                 except Exception:                     # noqa: BLE001
                     pass
                 return self._json(h)
+            if path == "/api/env":
+                return self._json(self.app.api_env({}))
             if path == "/api/events":
                 return self._sse()
             if path.startswith("/api/ocr/crop") and self.app.last_crop:
@@ -133,6 +135,8 @@ class H(BaseHTTPRequestHandler):
         try:
             if path == "/api/cfg":
                 return self._json(self.app.api_cfg(body))
+            if path == "/api/env":
+                return self._json(self.app.api_env(body))
             if path == "/api/tts_test":
                 return self._json(self.app.api_tts_test(body))
             if path == "/api/dk_preview":

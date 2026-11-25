@@ -1061,6 +1061,62 @@ class App:
               "B": metrics.summarize(segs, "B"), "C": metrics.summarize(segs, "C"),
               "rows": self.bus.recent(50)})
 
+    # ================================================================ 密钥
+    def api_env(self, body):
+        r"""看/写密钥。这是安装版里唯一必须手填的东西。
+
+        - GET（空 body）：返回状态，密钥只给后 6 位。
+        - POST {"key": "sk-...", "host": "..."}：写 %LOCALAPPDATA%\VRDub\config\.env.local
+          并热生效，不用重启；exe 里永不内置任何 key。
+        """
+        body = body if isinstance(body, dict) else {}
+        key = str(body.get("key") or "").strip()
+        host = str(body.get("host") or "").strip()
+        if key or host:
+            cur = {}
+            try:
+                cur = cfgmod._load_env(pathmod.ENV_FILE) or {}
+            except Exception:                       # noqa: BLE001
+                cur = {}
+            if key:
+                cur["DASHSCOPE_TOKENPLAN_KEY"] = key
+            if host:
+                cur["DASHSCOPE_TOKENPLAN_BASE"] = host
+            os.makedirs(pathmod.CONFIG_DIR, exist_ok=True)
+            tmp = pathmod.ENV_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write("# VRDub 本地密钥（只在这台机器上，不要提交到仓库）\n")
+                for k, v in cur.items():
+                    fh.write(f"{k}={v}\n")
+            os.replace(tmp, pathmod.ENV_FILE)
+            if key:
+                self.cfg.key = key
+            if host:
+                self.cfg.host = cfgmod._host_of(host)
+            try:
+                self.net.reset(host=self.cfg.host, key=self.cfg.key)
+            except Exception:                       # noqa: BLE001
+                pass
+            util.log(f"密钥已保存到 {pathmod.ENV_FILE}（后 6 位 …{self.cfg.key[-6:]}，"
+                     f"端点 {self.cfg.host}）", "info", "key")
+            # 换完 key 立刻验一次，别让用户猜为什么还是没声音
+            try:
+                st, _ = self.net.post("/compatible-mode/v1/chat/completions",
+                                      {"model": self.cfg.get("mt_model") or "qwen3.6-flash",
+                                       "messages": [{"role": "user", "content": "hi"}],
+                                       "max_tokens": 1, "stream": False},
+                                      timeout=12.0, retries=0)
+                self._key_ok = (st == 200)
+                util.log(f"密钥连通性自检：HTTP {st}", "info" if st == 200 else "err", "key")
+            except Exception as e:                  # noqa: BLE001
+                self._key_ok = False
+                util.log(f"密钥连通性自检失败：{e!r}", "err", "key")
+        k = self.cfg.key or ""
+        probe = getattr(self, "_key_ok", None)
+        return {"ok": True, "has_key": bool(k), "tail": k[-6:] if k else "",
+                "host": self.cfg.host, "path": pathmod.ENV_FILE,
+                "probe": "ok" if probe is True else ("fail" if probe is False else "未测")}
+
     # ================================================================ 改配置
     def api_cfg(self, patch):
         patch = {k: v for k, v in (patch or {}).items() if k in cfgmod.DEFAULTS}

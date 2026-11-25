@@ -433,6 +433,20 @@
       </section>
 
       <section class="card">
+        <h2 class="cardhd"><span>密钥</span><span class="hint" id="keyState">—</span></h2>
+        <div class="row"><label>Key</label>
+          <input type="password" id="keyVal" class="txt" placeholder="sk-… 粘贴阿里云百炼的套餐 key" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="row"><label>端点</label>
+          <input type="text" id="keyHost" class="txt" placeholder="token-plan.cn-beijing.maas.aliyuncs.com" spellcheck="false">
+        </div>
+        <div class="row"><label></label>
+          <button id="btnKeySave" class="btn primary">保存并自检</button>
+          <span class="hint" id="keyOut">只存本机 %LOCALAPPDATA%\VRDub\config\.env.local</span>
+        </div>
+      </section>
+
+      <section class="card">
         <h2 class="cardhd"><span>系统</span></h2>
         <div class="kv" id="sysInfo">
           <div><span>后端</span><b id="sysPid">—</b></div>
