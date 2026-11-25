@@ -37,6 +37,21 @@ from .vad import Segmenter
 
 ROOT = cfgmod.ROOT
 
+# ---- 子进程不能闪黑框 -------------------------------------------------------
+# hud/danmaku/ocr_overlay 都是 Qt 程序，用 python.exe 起会在屏幕上闪三个控制台窗口。
+# 统一用同目录的 pythonw.exe（GUI 子系统）+ CREATE_NO_WINDOW：既没有窗口，也不占控制台。
+# 冻结成 exe 之后 sys.executable 就是 VRDub.exe，pythonw 探测自然落空，走原路径。
+CREATE_NO_WINDOW = 0x08000000
+
+
+def _child_py() -> str:
+    exe = sys.executable
+    if os.name == "nt" and exe.lower().endswith("python.exe"):
+        cand = os.path.join(os.path.dirname(exe), "pythonw.exe")
+        if os.path.isfile(cand):
+            return cand
+    return exe
+
 
 class App:
     def __init__(self, use_hud=True, use_web=True):
@@ -719,9 +734,10 @@ class App:
         env.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
         self.hud_log = open(os.path.join(cfgmod.OUT, "hud.log"), "ab")
         try:
-            self.hud = subprocess.Popen([sys.executable, fp],
-                                        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                                        stderr=self.hud_log, cwd=ROOT, env=env)
+            self.hud = subprocess.Popen([_child_py(), fp],
+                                                    stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                                    stderr=self.hud_log, cwd=ROOT, env=env,
+                                                    creationflags=CREATE_NO_WINDOW)
             self.hud_send({"op": "cfg", "alpha": int(self.cfg.get("hud_alpha", 92)),
                            "scale": int(self.cfg.get("hud_scale", 100)),
                            "rows": int(self.cfg.get("hud_rows", 8)),
@@ -794,9 +810,10 @@ class App:
         env["PYTHONIOENCODING"] = "utf-8"
         self.overlay_log = open(os.path.join(cfgmod.OUT, "overlay.log"), "ab")
         try:
-            self.overlay = subprocess.Popen([sys.executable, fp],
-                                            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                                            stderr=self.overlay_log, cwd=ROOT, env=env)
+            self.overlay = subprocess.Popen([_child_py(), fp],
+                                                    stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                                    stderr=self.overlay_log, cwd=ROOT, env=env,
+                                                    creationflags=CREATE_NO_WINDOW)
             self.overlay_send(self._overlay_cfg())
             util.log(f"C 链原位浮现起 pid={self.overlay.pid}", "info", "overlay")
         except Exception as e:                      # noqa: BLE001
@@ -900,9 +917,10 @@ class App:
         env.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
         self.danmaku_log = open(os.path.join(cfgmod.OUT, "danmaku.log"), "ab")
         try:
-            self.danmaku = subprocess.Popen([sys.executable, fp],
-                                            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                                            stderr=self.danmaku_log, cwd=ROOT, env=env)
+            self.danmaku = subprocess.Popen([_child_py(), fp],
+                                                    stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                                    stderr=self.danmaku_log, cwd=ROOT, env=env,
+                                                    creationflags=CREATE_NO_WINDOW)
             self.danmaku_send(self._danmaku_cfg())
             util.log(f"弹幕浮窗起 pid={self.danmaku.pid}", "info", "danmaku")
         except Exception as e:                          # noqa: BLE001

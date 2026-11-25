@@ -5,6 +5,15 @@ cd /d "%~dp0"
 call "scripts\_env.bat"
 if errorlevel 1 ( pause & exit /b 1 )
 
+rem ---- 已经在跑就别再起一份 ----
+rem 守护脚本每 5 分钟探一次，端口判断稍有偏差就会叠出第二个 :run 循环，
+rem 表现就是屏幕上反复冒黑窗。这里挡住，重复启动只负责把浏览器指过去。
+netstat -ano | findstr ":8899" | findstr /i "LISTENING" >nul 2>nul
+if not errorlevel 1 (
+  if /i not "%~1"=="nobrowser" start "" http://127.0.0.1:8899/
+  exit /b 0
+)
+
 echo ============================================
 echo   VRChat 实时同传 · 控制台 http://127.0.0.1:8899/
 echo   关掉这个窗口 = 停止。Ctrl+C 也一样。
