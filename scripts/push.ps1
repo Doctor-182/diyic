@@ -89,6 +89,9 @@ if (-not $hasCred) {
 
 # ---- 4. push with retry ------------------------------------------------------
 $pushArgs = @()
+# Skip the GUI helper (Git Credential Manager) entirely: it pops a window and
+# blocks a non-interactive push. store reads ~/.git-credentials instead.
+$pushArgs += @("-c", "credential.helper=", "-c", "credential.helper=store")
 $pushArgs += $proxyArgs
 $pushArgs += @("push", $Remote, $Branch)
 if ($Force) { $pushArgs += "--force" }
