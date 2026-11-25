@@ -244,6 +244,16 @@ class StreamChain:
             return "直通模式（原声直通，不翻译）"
         return ""
 
+    def _persona(self) -> str:
+        """人设卡只属于「我」：A 链（麦克风）用自定义口吻，B / C 链一律不用。
+
+        为什么不能全局生效：B 链是把对方的话译成中文——那是对方在说话，套上「我」
+        的口吻等于替对方改人格（还会让模型以为在演同一个角色，语气串台）。
+        """
+        if self.src_key != "mic":
+            return ""
+        return str(self.cfg.get("persona_custom") or "")
+
     def _mt_off(self) -> str:
         """该不该翻译？关着返回原因，开着返回 ""。"""
         if not bool(self.cfg.get("mt_on", True)):
@@ -846,7 +856,7 @@ class StreamChain:
                         if util.similarity(ct, src_local) < 0.985:
                             r = self.mt.translate(ct, src=st.get("src_lang"), dst=dst_lang,
                                                   card=self.cfg.get("card", "natural"),
-                                                  timeout=left)
+                                                  timeout=left, custom=self._persona())
                             cd = (r.get("text") or "").strip()
                             if cd and not lang_leak(cd, dst_lang):
                                 out, why = cd, "云端"
@@ -903,7 +913,8 @@ class StreamChain:
                     sl = str(self.cfg.get("in_lang", lang or "ja"))
                     try:
                         r = self.mt.translate(ct, src=sl, dst=dl,
-                                              card=self.cfg.get("card", "natural"), timeout=8.0)
+                                              card=self.cfg.get("card", "natural"), timeout=8.0,
+                                              custom=self._persona())
                         dt = (r.get("text") or "").strip()
                         if dt and not lang_leak(dt, dl):
                             # 译文字数差得远才改成「已修正」，避免每句都闪
@@ -932,7 +943,7 @@ class StreamChain:
             for piece, first_ms, echo, rate_hint in self.mt.stream_clauses(
                     full, src=st["src_lang"], dst=dst, card=self.cfg.get("card", "natural"),
                     timeout=12.0, want_rate=self.src_key == "mic",
-                    ctx=st.get("ctx", "")):
+                    ctx=st.get("ctx", ""), custom=self._persona()):
                 # 这里绝不能按 echo 丢片段：整句重译本来就会重复已经念过的词，
                 # 丢了字幕就少尾巴（实测「…本当に同時通訳みたい」缺了「だね」）。
                 outs.append(piece)
@@ -943,7 +954,8 @@ class StreamChain:
             return
         if full_dst and lang_leak(full_dst, dst):
             r = self.mt.translate(full, src=st["src_lang"], dst=dst,
-                                  card=self.cfg.get("card", "natural"), timeout=12.0)
+                                  card=self.cfg.get("card", "natural"), timeout=12.0,
+                                  custom=self._persona())
             alt = (r.get("text") or "").strip()
             if alt and not lang_leak(alt, dst):
                 self.log("%s 译文串台（假名 %.2f）→ 已重翻：%s"
@@ -1016,7 +1028,8 @@ class StreamChain:
             for piece, first_ms, echo, rate_hint in self.mt.stream_clauses(
                     text, src=st["src_lang"], dst=st["dst_lang"],
                     card=self.cfg.get("card", "natural"), timeout=12.0,
-                    want_rate=self.src_key == "mic", ctx=st.get("ctx", "")):
+                    want_rate=self.src_key == "mic", ctx=st.get("ctx", ""),
+                    custom=self._persona()):
                 if echo or not _norm(piece):
                     continue
                 last = st.get("last_piece") or ""
@@ -1053,7 +1066,8 @@ class StreamChain:
         try:
             for piece, first_ms, echo, rate_hint in self.mt.stream_clauses(
                     text, src=srcl, dst=dst, card=card, timeout=12.0,
-                    want_rate=self.src_key == "mic", ctx=st.get("ctx", "")):
+                    want_rate=self.src_key == "mic", ctx=st.get("ctx", ""),
+                    custom=self._persona()):
                 if first is None:
                     first = (time.time() - t0) * 1000.0
                 if echo:
@@ -1104,7 +1118,8 @@ class StreamChain:
     def _unleak(self, text, srcl, dst, card, piece):
         """碎片译文串台（假名少得不像目标语）时整句重翻一次；救不回来返回空串=不念。"""
         try:
-            r = self.mt.translate(text, src=srcl, dst=dst, card=card, timeout=8.0)
+            r = self.mt.translate(text, src=srcl, dst=dst, card=card, timeout=8.0,
+                                  custom=self._persona())
             alt = util.clean_translation((r or {}).get("text") or "").strip()
         except Exception as e:                        # noqa: BLE001
             self.log(f"{self.name} 串台重翻失败：{e!r}", "warn", self.name)

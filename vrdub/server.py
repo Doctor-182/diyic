@@ -94,6 +94,8 @@ class H(BaseHTTPRequestHandler):
                 return self._json(h)
             if path == "/api/env":
                 return self._json(self.app.api_env({}))
+            if path == "/api/voice_clone":
+                return self._json(self.app.api_voice_job({}))
             if path == "/api/events":
                 return self._sse()
             if path.startswith("/api/ocr/crop") and self.app.last_crop:
@@ -139,6 +141,14 @@ class H(BaseHTTPRequestHandler):
                 return self._json(self.app.api_env(body))
             if path == "/api/tts_test":
                 return self._json(self.app.api_tts_test(body))
+            if path == "/api/voice_sample":
+                return self._json(self.app.api_voice_sample(body))
+            if path == "/api/voice_clone":
+                return self._json(self.app.api_voice_clone(body))
+            if path == "/api/voice_use":
+                return self._json(self.app.api_voice_use(body))
+            if path == "/api/voice_del":
+                return self._json(self.app.api_voice_del(body))
             if path == "/api/dk_preview":
                 return self._json(self.app.api_dk_preview(body))
             if path == "/api/inject":

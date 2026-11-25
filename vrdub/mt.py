@@ -40,8 +40,9 @@ class Translator:
         self.net = net
         self.log = log
 
-    def _body(self, text, src, dst, card, stream, temperature=0.25, ctx=""):
-        sysp = persona.system_prompt(dst, card, src)
+    def _body(self, text, src, dst, card, stream, temperature=0.25, ctx="",
+              custom=None):
+        sysp = persona.system_prompt(dst, card, src, custom)
         if not sysp:
             return None
         return {
@@ -54,7 +55,8 @@ class Translator:
         }
 
     # ---------------------------------------------------------------- 非流式
-    def translate(self, text: str, src="auto", dst="zh", card="natural", timeout=10.0) -> dict:
+    def translate(self, text: str, src="auto", dst="zh", card="natural", timeout=10.0,
+                  custom=None) -> dict:
         t0 = time.time()
         if dst in ("none", "", None) or not (text or "").strip():
             return {"text": text, "ms": 0.0, "echo": False}
@@ -67,20 +69,20 @@ class Translator:
         if (src in ("auto", "", None) and util.lang_ok(text, dst)):
             # auto 模式下原文本来就是目标语言（A 链中文模式最常见）→ 直通，别过模型
             return {"text": text, "ms": 0.0, "echo": False, "same_lang": True}
-        body = self._body(text, src, dst, card, False)
+        body = self._body(text, src, dst, card, False, custom=custom)
         j = self.net.post_json(PATH, body, timeout=timeout)
         out = ((j.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
         out = util.clean_translation(out)
         echo = self._is_echo(text, out, src, dst)
         if echo:
-            out2 = self._retry_echo(text, src, dst, card, timeout)
+            out2 = self._retry_echo(text, src, dst, card, timeout, custom=custom)
             if out2 and not self._is_echo(text, out2, src, dst):
                 out, echo = out2, False
             else:
                 out = out2 or out
         # 目标语校验：中文串进日语、英文串进中文字幕、原样吐回原文，都在这儿拦一次
         if out and not util.lang_ok(out, dst):
-            alt = self._strict(text, src, dst, card, timeout)
+            alt = self._strict(text, src, dst, card, timeout, custom=custom)
             if alt and util.lang_ok(alt, dst):
                 self.log(f"译文语言不对（{dst}）→ 已重翻：{out[:18]!r} → {alt[:18]!r}",
                          "warn", "mt")
@@ -92,9 +94,9 @@ class Translator:
                         "echo": False, "lang_fail": True, "raw": out}
         return {"text": out, "ms": (time.time() - t0) * 1000.0, "echo": echo}
 
-    def _retry_echo(self, text, src, dst, card, timeout):
+    def _retry_echo(self, text, src, dst, card, timeout, custom=None):
         """回声重试：提示词里点名「不要照抄原文」，temperature 提到 0.6 换条路径。"""
-        sysp = persona.system_prompt(dst, card, src)
+        sysp = persona.system_prompt(dst, card, src, custom)
         if not sysp:
             return ""
         body = {
@@ -111,9 +113,9 @@ class Translator:
         except Exception:
             return ""
 
-    def _strict(self, text, src, dst, card, timeout=10.0):
+    def _strict(self, text, src, dst, card, timeout=10.0, custom=None):
         """目标语错了以后的一次强约束重翻：点名语言、禁英文、禁标签。"""
-        sysp = persona.system_prompt(dst, card, src)
+        sysp = persona.system_prompt(dst, card, src, custom)
         if not sysp:
             return ""
         lang = persona.LANG_NAME.get(dst, dst)
@@ -150,7 +152,7 @@ class Translator:
 
     # ---------------------------------------------------------------- 流式
     def stream_clauses(self, text: str, src="auto", dst="zh", card="natural",
-                       timeout=12.0, want_rate=False, ctx=""):
+                       timeout=12.0, want_rate=False, ctx="", custom=None):
         """逐个子句 yield (子句, 首包ms, 是否回声, 语速提示)。调用方拿到就送 TTS。"""
         if dst in ("none", "", None) or not (text or "").strip():
             if (text or "").strip():
@@ -163,7 +165,7 @@ class Translator:
         if src in ("auto", "", None) and util.lang_ok(text, dst):
             yield text, 0.0, False, None          # 原文已是目标语言 → 直通
             return
-        body = self._body(text, src, dst, card, True, ctx=ctx)
+        body = self._body(text, src, dst, card, True, ctx=ctx, custom=custom)
         buf = ""
         t0 = time.time()
         first_ms = None
@@ -180,7 +182,7 @@ class Translator:
                 piece = util.clean_translation(piece)
                 if piece and not util.lang_ok(piece, dst):
                     # 流式片段语言不对（中英日串台）：强约束重翻这一片，救不回来就不念
-                    alt = self._strict(piece, src, dst, card, timeout)
+                    alt = self._strict(piece, src, dst, card, timeout, custom=custom)
                     if alt and util.lang_ok(alt, dst):
                         piece = alt
                     else:
@@ -192,7 +194,7 @@ class Translator:
         if buf.strip():
             tail = util.clean_translation(buf)
             if tail and not util.lang_ok(tail, dst):
-                alt = self._strict(tail, src, dst, card, timeout)
+                alt = self._strict(tail, src, dst, card, timeout, custom=custom)
                 if alt and util.lang_ok(alt, dst):
                     tail = alt
                 else:

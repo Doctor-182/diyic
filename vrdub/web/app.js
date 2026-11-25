@@ -266,6 +266,8 @@
       renderSpeed();
     }
     renderVoices();
+    renderPersona();
+    renderVoiceJob(st.voiceJob);
     renderChains();
   }
 
@@ -402,7 +404,9 @@
       var on = String(v.id) === String(st.cfg.voice);
       var tip = (v.name || v.id) + (v.note ? " · " + v.note : "");
       return '<button class="vchip' + (on ? " on" : "") + '" data-voice="' + esc(v.id) + '" title="' + esc(tip) + '">' +
-        "<b>" + esc(voiceLabel(v, i)) + "</b><span>" + esc(voiceShort(v, i)) + "</span></button>";
+        "<b>" + esc(voiceLabel(v, i)) + "</b><span>" + esc(voiceShort(v, i)) + "</span>" +
+        (v.custom ? '<em class="vdel" data-del="' + esc(v.id) + '" title="删掉这个克隆音色">×</em>' : "") +
+        "</button>";
     }).join("");
     var cur = st.voices.filter(function (v) { return String(v.id) === String(st.cfg.voice); })[0];
     if (els.voiceNote) {
@@ -416,6 +420,80 @@
       var pct = ((Number(st.speed) - 0.6) / (1.6 - 0.6)) * 100;
       els.speed.style.setProperty("--p", clamp(pct, 0, 100).toFixed(1) + "%");
     }
+  }
+
+  /* 人设卡：预设 chips + 自定义口吻（只影响语气） */
+  function renderPersona() {
+    if (!els.personaCards) return;
+    var p = st.persona || {};
+    var cards = p.cards || [];
+    // 后端没连上（离线预览/刚启动）时也要有三张卡，否则这块看起来像坏了
+    if (!cards.length) {
+      cards = [{ id: "natural", name: "自然口语（默认）", note: "朋友间随性口吻" },
+               { id: "teto", name: "テト · 活泼", note: "短句、语气跳" },
+               { id: "polite", name: "敬语 · 正式", note: "です・ます" }];
+    }
+    els.personaCards.innerHTML = cards.map(function (c) {
+      var on = String(c.id) === String(st.cfg.card || "natural");
+      var nm = String(c.name || c.id);
+      var parts = nm.split(/[·|]/);
+      var head = (parts[0] || nm).trim();
+      var tail = (parts[1] || c.note || "").trim();
+      return '<button class="vchip' + (on ? " on" : "") + '" data-card="' + esc(c.id) + '" title="' + esc(c.note || nm) + '">' +
+        "<b>" + esc(head) + "</b><span>" + esc(tail) + "</span></button>";
+    }).join("");
+    if (els.personaText && document.activeElement !== els.personaText && !st.personaDirty) {
+      els.personaText.value = st.cfg.persona_custom || "";
+    }
+    updatePersonaHint();
+  }
+  function updatePersonaHint() {
+    if (!els.personaHint || !els.personaText) return;
+    setTx(els.personaHint, String(els.personaText.value.length) + " / 1200");
+  }
+
+  /* 克隆音色：录音 → 试听 → 上传训练 → 自动切过去（全程不离开这个页面） */
+  var cloneT = null;
+  function setClone(txt, state) {
+    if (!els.cloneOut) return;
+    setTx(els.cloneOut, txt);
+    if (state) els.cloneOut.dataset.state = state;
+    else delete els.cloneOut.dataset.state;
+  }
+  function setBar(pct) {
+    if (els.cloneBar) els.cloneBar.style.width = clamp(pct, 0, 100).toFixed(1) + "%";
+  }
+  function renderVoiceJob(j) {
+    if (!j) return;
+    if (j.on) {
+      var pct = j.tries_max ? (j.tries / j.tries_max) * 100 : 10;
+      setBar(Math.max(6, pct));
+      setClone((j.phase || "克隆中") + (j.tries ? " " + j.tries + "/" + j.tries_max : "") +
+        (j.endpoint ? " · " + j.endpoint : ""), "warn");
+      pollClone();
+    } else if (j.phase === "完成") {
+      setBar(100);
+      setClone((j.msg || "完成") + (j.secs ? "（" + j.secs + " s）" : ""), "ok");
+    } else if (j.phase === "失败") {
+      setBar(0);
+      setClone("失败：" + (j.err || "未知原因"), "err");
+    }
+  }
+  function pollClone() {
+    if (cloneT) return;
+    cloneT = setInterval(function () {
+      apiGet("/api/voice_clone").then(function (j) {
+        if (!j) return;
+        if (j.voices) { st.voices = j.voices; renderVoices(); }
+        if (j.cur) st.cfg.voice = j.cur;
+        if (!j.job) return;
+        renderVoiceJob(j.job);
+        if (!j.job.on) {
+          clearInterval(cloneT); cloneT = null;
+          apiGet("/api/state").then(applyState);
+        }
+      });
+    }, 1000);
   }
 
   /* ------------------------------ 三链卡片 ------------------------------ */
@@ -925,6 +1003,8 @@
     st.cfg = Object.assign({}, st.cfg, s.cfg || {});
     if (s.devices) st.devices = s.devices;
     if (s.voices) st.voices = s.voices;
+    if (s.persona) st.persona = s.persona;
+    if (s.voice_job) st.voiceJob = s.voice_job;
     if (s.metrics) st.metrics = s.metrics;
     if (s.hud) st.hud = s.hud;
     if (s.danmaku) st.danmaku = s.danmaku;
@@ -1301,6 +1381,12 @@
     els.selMicDev = $("#selMicDev"); els.selOutDev = $("#selOutDev"); els.selLoopDev = $("#selLoopDev");
   els.selMonDev = $("#selMonDev"); els.chkMonOn = $("#chkMonOn");
     els.voiceChips = $("#voiceChips"); els.voiceNote = $("#voiceNote");
+    els.cloneName = $("#cloneName"); els.btnVoiceRec = $("#btnVoiceRec");
+    els.btnVoicePlay = $("#btnVoicePlay"); els.btnVoiceClone = $("#btnVoiceClone");
+    els.cloneOut = $("#cloneOut"); els.cloneBar = $("#cloneBar");
+    els.personaCards = $("#personaCards"); els.personaText = $("#personaText");
+    els.personaHint = $("#personaHint"); els.personaOut = $("#personaOut");
+    els.btnPersonaSave = $("#btnPersonaSave"); els.btnPersonaClear = $("#btnPersonaClear");
     els.speed = $("#speed"); els.speedVal = $("#speedVal");
     els.engA = $("#engA"); els.engB = $("#engB"); els.engC = $("#engC");
     els.liveA = $("#liveA"); els.liveB = $("#liveB"); els.liveC = $("#liveC");
@@ -1380,6 +1466,19 @@
 
     if (els.voiceChips) {
       els.voiceChips.addEventListener("click", function (e) {
+        var del = e.target.closest("[data-del]");
+        if (del) {
+          var did = del.dataset.del;
+          if (!window.confirm("删掉这个克隆音色？云端那份也一起删。")) return;
+          apiPost("/api/voice_del", { id: did }).then(function (j) {
+            if (!j || j.ok === false) { log("err", "删除音色失败"); return; }
+            st.voices = j.voices || st.voices;
+            st.cfg.voice = j.cur || st.cfg.voice;
+            renderVoices();
+            log("info", "已删除克隆音色");
+          });
+          return;
+        }
         var b = e.target.closest(".vchip");
         if (!b) return;
         var id = b.dataset.voice;
@@ -1387,6 +1486,93 @@
         renderVoices();
         sendCfg("voice", id);
         log("info", "音色 → " + b.textContent.replace(/\s+/g, " ").trim());
+      });
+    }
+
+    // 音色克隆：录音（最长 30 s，默认 15）→ 试听 → 上传训练 → 自动切过去
+    if (els.btnVoiceRec) {
+      els.btnVoiceRec.addEventListener("click", function () {
+        var b = els.btnVoiceRec;
+        b.disabled = true;
+        setBar(0);
+        setClone("录音中… 现在开始，自然说 15 秒", "warn");
+        apiPost("/api/voice_sample", { action: "record", seconds: 15 }).then(function (j) {
+          b.disabled = false;
+          if (!j || j.ok === false) {
+            setClone("录音失败：" + ((j && (j.err || j.error)) || "接口没回"), "err");
+            return;
+          }
+          st.sampleSecs = Number(j.secs) || 0;
+          setBar(Math.min(100, (st.sampleSecs / 20) * 100));
+          setClone("样本 " + j.secs + " s · " + j.rms_db + " dBFS" +
+            (j.hint ? " · " + j.hint : ""), st.sampleSecs >= 3 ? "ok" : "warn");
+          log("info", "音色样本 " + j.secs + " s / " + j.sr + " Hz");
+        });
+      });
+    }
+    if (els.btnVoicePlay) {
+      els.btnVoicePlay.addEventListener("click", function () {
+        apiPost("/api/voice_sample", { action: "play" }).then(function (j) {
+          if (!j || j.ok === false) { setClone("还没有能放的样本", "warn"); return; }
+          setClone("正在回放样本（" + j.secs + " s）", "ok");
+        });
+      });
+    }
+    if (els.btnVoiceClone) {
+      els.btnVoiceClone.addEventListener("click", function () {
+        if (!st.sampleSecs) { setClone("先点「录音」，录一段再克隆", "warn"); return; }
+        var name = (els.cloneName && els.cloneName.value || "").trim();
+        setBar(4);
+        setClone("提交样本…", "warn");
+        apiPost("/api/voice_clone", { name: name, secs: st.sampleSecs }).then(function (j) {
+          if (!j || j.ok === false) {
+            setClone("提交失败：" + ((j && (j.err || j.error)) || "接口没回"), "err");
+            return;
+          }
+          renderVoiceJob(j.job);
+        });
+      });
+    }
+
+    // 人设：预设卡点一下就换；自定义那段要点「保存」才生效（避免边打字边改提示词）
+    if (els.personaCards) {
+      els.personaCards.addEventListener("click", function (e) {
+        var b = e.target.closest(".vchip");
+        if (!b) return;
+        var id = b.dataset.card;
+        st.cfg.card = id;
+        renderPersona();
+        sendCfg("card", id);
+        log("info", "人设卡 → " + b.textContent.replace(/\s+/g, " ").trim());
+      });
+    }
+    if (els.personaText) {
+      els.personaText.addEventListener("input", function () {
+        st.personaDirty = true;
+        updatePersonaHint();
+      });
+    }
+    if (els.btnPersonaSave) {
+      els.btnPersonaSave.addEventListener("click", function () {
+        var txt = (els.personaText && els.personaText.value || "").trim();
+        apiPost("/api/cfg", { persona_custom: txt }).then(function (j) {
+          if (j && j.cfg) { st.cfg = Object.assign({}, st.cfg, j.cfg); syncControls(); }
+          st.personaDirty = false;
+          renderPersona();
+          if (els.personaOut) setTx(els.personaOut, txt ? ("已保存 " + txt.length + " 字，下一句就用新口吻") : "已清空，回到预设卡的口吻");
+          log("info", "人设口吻 → " + (txt ? txt.length + " 字" : "空"));
+        });
+      });
+    }
+    if (els.btnPersonaClear) {
+      els.btnPersonaClear.addEventListener("click", function () {
+        if (els.personaText) els.personaText.value = "";
+        st.personaDirty = false;
+        updatePersonaHint();
+        apiPost("/api/cfg", { persona_custom: "" }).then(function () {
+          st.cfg.persona_custom = "";
+          if (els.personaOut) setTx(els.personaOut, "已清空自定义口吻");
+        });
       });
     }
 

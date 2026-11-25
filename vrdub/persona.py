@@ -49,14 +49,57 @@ CARDS = {
 
 NONE_HINT = "none"
 
+# 自定义人设（用户自己写的那段）。放在模块级是因为它只有一份：这台机器上只有
+# 一个「我」，A 链的口吻是全局的。写进 mt 的每个签名要改五处调用，收益为零。
+CUSTOM_MAX = 1200
+_custom = {"text": ""}
 
-def system_prompt(dst: str, card: str = "natural", src: str = "auto") -> str:
-    """返回系统提示词。dst=none 表示不翻译（直通）。"""
+
+def set_custom(text: str) -> str:
+    """设定自定义人设，返回真正生效的文本（超长截断、去首尾空白）。"""
+    t = (text or "").strip()
+    if len(t) > CUSTOM_MAX:
+        t = t[:CUSTOM_MAX].rstrip()
+    _custom["text"] = t
+    return t
+
+
+def get_custom() -> str:
+    return _custom["text"]
+
+
+def _custom_block(text: str) -> str:
+    """把自定义人设包成一段「只准改口吻」的约束块。
+
+    为什么不是直接把用户的话扔进 system：用户会写「你是傲娇的女高中生，说话要
+    带刺」这种纯角色设定，模型拿到之后很容易开始表演——替你改内容、加语气词、
+    把一句话拆成三句。所以先声明「下面只是口吻层」，再跟 FIDELITY 收口。
+    """
+    t = (text or "").strip()
+    if not t:
+        return ""
+    return ("\n口吻设定（只影响语气、用词和称呼，**不许**改动内容与信息量；"
+            "与前面的要求冲突时，以不改变内容为准）：\n" + t)
+
+
+def system_prompt(dst: str, card: str = "natural", src: str = "auto",
+                  custom: str | None = None) -> str:
+    """返回系统提示词。dst=none 表示不翻译（直通）。
+
+    custom 传 None 表示用模块级当前值（`set_custom` 设的那个）；传 "" 表示明确不用。
+    """
     if dst in (NONE_HINT, "", None):
         return ""
     c = CARDS.get(card) or CARDS["natural"]
     base = c.get(dst) or c.get("zh")
-    return base + FIDELITY
+    extra = _custom["text"] if custom is None else custom
+    return base + _custom_block(extra) + FIDELITY
+
+
+def describe() -> dict:
+    """给前端/日志用的一行摘要。"""
+    return {"custom_len": len(_custom["text"]), "max": CUSTOM_MAX,
+            "cards": card_list()}
 
 
 LANG_NAME = {"ja": "日语", "zh": "中文", "en": "英语", "ko": "韩语"}

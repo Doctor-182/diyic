@@ -51,7 +51,13 @@ DEFAULTS = {
     "in_lang": "auto",          # B 链识别语
     "sub_lang": "zh",           # B/C 译文
     "card": "natural",         # 保真优先；要角色感再切 teto
+    "persona_custom": "",      # 自定义人设（只影响口吻；A 链专属，B/C 链不用）
     "voice": VOICE_T3,
+    # 克隆出来的音色：voice_id → 名字/模型/时间，存在 settings 里（云端才是真身，这里只是索引）
+    "voices_custom": [],
+    # 音色复刻：样本走哪个模型训练、走哪个端点（套餐端点不一定开放复刻，auto = 先套餐再按量）
+    "voice_clone_model": "qwen-audio-3.0-tts-plus",
+    "voice_clone_endpoint": "auto",
     "out_on": True,
     "in_on": True,
     # 两个正交总闸：链开关关的是「这条链干不干活」，总闸关的是「整机允许它干什么」。
@@ -392,6 +398,32 @@ def clamp_cfg(d: dict) -> dict:
     d["hud_scale"] = max(60, min(200, int(d.get("hud_scale", 100))))
     d["danmaku_scale"] = max(60, min(200, int(d.get("danmaku_scale", 100))))
     d["danmaku_alpha"] = max(40, min(100, int(d.get("danmaku_alpha", 100))))
+    # 人设：预设卡只认白名单，自定义只留纯文本（超过 1200 字截断——模型吃不下也没意义）
+    _card = str(d.get("card", "natural") or "natural").strip()
+    d["card"] = _card if _card in ("natural", "teto", "polite") else "natural"
+    _pc = d.get("persona_custom", "")
+    d["persona_custom"] = (str(_pc) if isinstance(_pc, str) else "").strip()[:1200]
+    # 克隆音色：只收我们自己写进去的形状（voice_id 必须像 qwen-audio-*-<t?>-<32位十六进制>）
+    _vc = d.get("voices_custom")
+    if not isinstance(_vc, list):
+        d["voices_custom"] = []
+    else:
+        out = []
+        for it in _vc:
+            if not isinstance(it, dict):
+                continue
+            vid = str(it.get("id") or "").strip()
+            if not vid or len(vid) > 200 or " " in vid:
+                continue
+            out.append({"id": vid,
+                        "name": str(it.get("name") or vid)[:40],
+                        "model": str(it.get("model") or "")[:60],
+                        "ts": float(it.get("ts") or 0.0)})
+        d["voices_custom"] = out[:24]
+    if d.get("voice_clone_endpoint") not in ("auto", "plan", "payg"):
+        d["voice_clone_endpoint"] = "auto"
+    _vcm = str(d.get("voice_clone_model") or "").strip()
+    d["voice_clone_model"] = _vcm[:60] if _vcm else "qwen-audio-3.0-tts-plus"
     _dkst = str(d.get("danmaku_style", "card") or "card").strip().lower()
     d["danmaku_style"] = _dkst if _dkst in ("card", "plain", "bar", "neon") else "card"
     d["danmaku_speed"] = max(2.5, min(20.0, float(d.get("danmaku_speed", 7.0) or 7.0)))

@@ -23,6 +23,8 @@ import webbrowser
 from . import audio, bus as busmod, chains, metrics
 from . import cfg as cfgmod
 from . import mt as mtmod
+from . import persona as personamod
+from . import voices as voicemod
 from . import net as netmod
 from . import osc as oscmod
 from . import procloop as procloopmod
@@ -57,9 +59,14 @@ class App:
         self.use_web = use_web
         self.stopping = False
         self.net = netmod.Net("ali", self.cfg.host, self.cfg.key, slots=10)
+        # 按量付费端点单独一条（音色复刻不一定在套餐里；只有克隆会用到，懒连接）
+        self.net_payg = (netmod.Net("payg", self.cfg.payg_host, self.cfg.payg_key, slots=2)
+                         if getattr(self.cfg, "payg_key", "") else None)
         self.synth = ttsmod.Synth(self.cfg, self.net)
         self.asr = Transcriber(self.cfg, self.net)
         self.mt = mtmod.Translator(self.cfg, self.net)
+        self.cloner = voicemod.Cloner(self.cfg, self.net, self.net_payg)
+        self.voice_job = None        # 克隆任务状态（前端轮询 /api/voice_clone）
         self.player = None
         self.through = None
         self.mic_cap = None
@@ -119,6 +126,9 @@ class App:
             util.log("已从程序目录搬到用户目录：" + "、".join(moved), "info", "boot")
         if rot:
             util.log("日志轮转：" + "、".join(rot), "info", "boot")
+        pc = personamod.set_custom(str(self.cfg.get("persona_custom") or ""))
+        util.log(f"人设卡：{self.cfg.get('card')} · 自定义口吻 "
+                 f"{'空' if not pc else str(len(pc)) + ' 字'}", "info", "boot")
         self._check()
         if not self.cfg.key:
             util.log("没有 DASHSCOPE_TOKENPLAN_KEY（.env.local），云端功能会全挂", "err", "boot")
@@ -1012,7 +1022,10 @@ class App:
             "ok": True, "ver": version.short(), "ver_full": version.full(),
             "frozen": version.frozen(), "pid": os.getpid(),
             "uptime_s": round(time.time() - self.t0, 1),
-            "cfg": c, "devices": self.devices(), "voices": cfgmod.VOICES,
+            "cfg": c, "devices": self.devices(), "voices": self.voice_list(),
+            "voice_job": (dict(self.voice_job) if isinstance(self.voice_job, dict) else None),
+            # 人设卡（预设 + 自定义口吻）。前端只读这里，不写死三张卡的名字。
+            "persona": personamod.describe(),
             "metrics": {k: metrics.summarize(segs, k) for k in ("A", "B", "C")},
             "hud": {"on": bool(c.get("hud_on")), "pid": getattr(self.hud, "pid", 0) or 0,
                     "alive": bool(self.hud is not None and self.hud.poll() is None)},
@@ -1230,6 +1243,13 @@ class App:
                      "info", "cfg")
         if keys & {"out_on", "in_on", "asr_on", "mt_on", "mode", "mic_on"}:
             self._apply_chain_gates(keys)
+        if keys & {"card", "persona_custom"}:
+            if "persona_custom" in keys:
+                pc = personamod.set_custom(str(self.cfg.get("persona_custom") or ""))
+                util.log(f"人设口吻已更新：{'空（只用预设卡）' if not pc else str(len(pc)) + ' 字'}",
+                         "info", "cfg")
+            else:
+                util.log(f"人设卡 → {self.cfg.get('card')}", "info", "cfg")
         if "mic_on" in keys:
             self.bus.set_mic(on=bool(self.cfg.get("mic_on", True)),
                              dev=self.cfg.get("mic_dev"), reason="")
@@ -1357,7 +1377,8 @@ class App:
         dst = text
         mt_ms = 0.0
         try:
-            tr = self.mt.translate(text, src=lang, dst=dst_lang, card=self.cfg.get("card"))
+            tr = self.mt.translate(text, src=lang, dst=dst_lang, card=self.cfg.get("card"),
+                                   custom=str(self.cfg.get("persona_custom") or ""))
             dst = tr.get("text") or text
             mt_ms = float(tr.get("ms") or 0.0)
         except Exception as e:                          # noqa: BLE001
@@ -1394,6 +1415,200 @@ class App:
         return res
 
     # ================================================================ 试听
+    # ================================================================ 音色
+    def voice_list(self):
+        """控制台音色下拉的数据源：内置 4 个 + 自己克隆的。"""
+        out = []
+        for v in cfgmod.VOICES:
+            out.append({"id": v["id"], "name": v["name"], "note": v.get("note", ""),
+                        "custom": False, "model": "qwen-audio-3.0-tts-plus"})
+        for v in (self.cfg.get("voices_custom") or []):
+            if not isinstance(v, dict) or not v.get("id"):
+                continue
+            out.append({"id": str(v["id"]),
+                        "name": str(v.get("name") or ("克隆 " + str(v["id"])[-6:])),
+                        "note": "克隆 · " + str(v.get("model") or "").replace("qwen-audio-", ""),
+                        "custom": True, "model": str(v.get("model") or "")})
+        return out
+
+    def _voice_dir(self):
+        p = os.path.join(pathmod.OUT, "voice")
+        os.makedirs(p, exist_ok=True)
+        return p
+
+    def api_voice_sample(self, body):
+        """录一段克隆样本（默认 15 s），顺便把它转成云端要的形状。
+
+        action=record（默认）录新的；action=play 重放上一次的样本，方便试听。
+        """
+        body = body or {}
+        act = str(body.get("action") or "record").strip().lower()
+        d = self._voice_dir()
+        raw = os.path.join(d, "sample_raw.wav")
+        dst = os.path.join(d, "sample.wav")
+        if act == "play":
+            if not os.path.exists(dst):
+                return {"ok": False, "err": "还没有录音"}
+            try:
+                import wave
+                with wave.open(dst, "rb") as w:
+                    sr = w.getframerate()
+                    pcm = w.readframes(w.getnframes())
+                dev = int(self.cfg.get("mon_dev", 19))
+                threading.Thread(target=lambda: audio.play_pcm(
+                    dev, pcm, sr, float(self.cfg.get("gain", 1.0)), log=util.log),
+                    name="voice-play", daemon=True).start()
+                return {"ok": True, "play": True, "secs": round(len(pcm) / 2.0 / sr, 2)}
+            except Exception as e:                      # noqa: BLE001
+                return {"ok": False, "err": "播放失败：" + repr(e)}
+        try:
+            secs_want = float(body.get("seconds") or 15.0)
+        except Exception:                                # noqa: BLE001
+            secs_want = 15.0
+        secs_want = max(3.0, min(30.0, secs_want))
+        dev = int(self.cfg.get("mic_dev", 23))
+        # 录音期间把 A 链采集让出来：同一支麦上两路流，WASAPI 共享模式虽然允许，
+        # 但采样率协商会互相拖（实测偶发 -9999），不如干脆让一下。
+        had_mic = self.mic_cap is not None
+        try:
+            if had_mic:
+                self.stop_mic()
+            util.log("开始录音色样本 %.0f s（设备 #%d）" % (secs_want, dev), "info", "voice")
+            got = audio.record(dev, secs_want, raw, log=util.log)
+        except Exception as e:                          # noqa: BLE001
+            util.log("录音色样本失败：%r" % (e,), "err", "voice")
+            return {"ok": False, "err": "录音失败：" + repr(e)}
+        finally:
+            if had_mic:
+                try:
+                    self.start_mic()
+                except Exception:                        # noqa: BLE001
+                    pass
+        try:
+            meta = voicemod.to_clone_wav(raw, dst, sr=voicemod.SR_MIN)
+        except Exception as e:                          # noqa: BLE001
+            util.log("样本转码失败：%r" % (e,), "err", "voice")
+            return {"ok": False, "err": "转码失败：" + repr(e), "raw": raw}
+        meta.update({"ok": True, "recorded": round(got, 2), "path": dst})
+        # 把这次的客观指标写在小文件里：重启后仍然知道"这份样本够不够格"，
+        # 免得用户录了一段静音、半小时后点克隆，云端白跑一趟。
+        try:
+            with open(os.path.join(d, "sample.json"), "w", encoding="utf-8") as fh:
+                json.dump({"secs": meta["secs"], "rms_db": meta["rms_db"],
+                           "peak": meta["peak"], "ts": time.time()}, fh)
+        except Exception:                                # noqa: BLE001
+            pass
+        # 顺手把「这段话听起来怎么样」报出来，前端不用自己算
+        if meta["secs"] < voicemod.SEC_MIN:
+            meta["hint"] = "太短了，再录长一点（≥ %.0f s）" % voicemod.SEC_MIN
+        elif meta["rms_db"] < -34.0:
+            meta["hint"] = "声音偏小（%.0f dBFS），离麦近一点或把麦克风增益调高" % meta["rms_db"]
+        else:
+            meta["hint"] = "可以了，点「克隆」交给云端"
+        util.log("样本就绪：%.1f s / %d Hz / %.0f dBFS / 增益 %.1f×"
+                 % (meta["secs"], meta["sr"], meta["rms_db"], meta["gain"]), "info", "voice")
+        return meta
+
+    def api_voice_clone(self, body):
+        """启动克隆（后台线程）。body 里的 name 只是给人看的标签。"""
+        body = body or {}
+        job = self.voice_job if isinstance(self.voice_job, dict) else None
+        if job and job.get("on"):
+            return {"ok": False, "err": "上一个克隆还在跑", "job": dict(job)}
+        dst = os.path.join(self._voice_dir(), "sample.wav")
+        if not os.path.exists(dst):
+            return {"ok": False, "err": "先录一段样本"}
+        name = str(body.get("name") or "").strip()[:40]
+        model = str(body.get("model") or self.cfg.get("voice_clone_model")
+                    or "qwen-audio-3.0-tts-plus").strip()
+        try:
+            secs = float(body.get("secs") or 0.0)
+        except Exception:                                # noqa: BLE001
+            secs = 0.0
+        self.voice_job = {"on": True, "phase": "准备", "err": "", "voice_id": "",
+                          "name": name or time.strftime("克隆 %m-%d %H:%M"),
+                          "model": model, "t0": time.time(), "tries": 0, "tries_max": 40}
+        th = threading.Thread(target=self._voice_clone_worker,
+                              args=(dst, name, model, secs), name="voice-clone", daemon=True)
+        th.start()
+        return {"ok": True, "job": dict(self.voice_job)}
+
+    def _voice_clone_worker(self, path, name, model, secs):
+        job = self.voice_job if isinstance(self.voice_job, dict) else {}
+        try:
+            meta = {}
+            try:
+                with open(os.path.join(os.path.dirname(path), "sample.json"),
+                          "r", encoding="utf-8") as fh:
+                    meta = json.load(fh) or {}
+            except Exception:                            # noqa: BLE001
+                meta = {}
+            secs = secs or float(meta.get("secs") or 0.0)
+            rms = float(meta.get("rms_db") or 0.0)
+            if rms and rms < -46.0:
+                raise voicemod.VoiceError(
+                    "这段样本几乎是静音（%.0f dBFS）：先确认麦克风选对了、对着它说话再录" % rms)
+            voicemod.check_sample(path, secs=secs or None)
+            job.update(phase="上传样本", tries=0)
+            r = self.cloner.create(path, name=name or "vdub", target_model=model,
+                                   secs_hint=secs or None)
+            vid = r["voice_id"]
+            job.update(voice_id=vid, phase="云端部署", endpoint=r.get("endpoint", ""))
+
+            def prog(i, n, st):
+                job.update(tries=i, tries_max=n,
+                           phase="云端部署" + ((" · " + st) if st else ""))
+
+            res = self.cloner.wait(vid, progress=prog)
+            lst = [x for x in (self.cfg.get("voices_custom") or [])
+                   if isinstance(x, dict) and str(x.get("id")) != vid]
+            lst.append({"id": vid, "name": job.get("name") or "克隆", "model": model,
+                        "ts": time.time()})
+            self.api_cfg({"voices_custom": lst, "voice": vid, "voice_clone_model": model})
+            job.update(on=False, phase="完成", err="",
+                       msg="已切到新音色（%s）" % (res.get("status") or "OK"),
+                       secs=round(time.time() - float(job.get("t0") or time.time()), 1))
+            util.log("音色克隆完成：%s → 已切过去" % vid, "info", "voice")
+        except Exception as e:                           # noqa: BLE001
+            msg = str(e) or repr(e)
+            job.update(on=False, phase="失败", err=msg[:300],
+                       secs=round(time.time() - float(job.get("t0") or time.time()), 1))
+            util.log("音色克隆失败：%s" % msg[:300], "err", "voice")
+
+    def api_voice_job(self, body=None):
+        job = self.voice_job if isinstance(self.voice_job, dict) else None
+        return {"ok": True, "job": (dict(job) if job else None),
+                "voices": self.voice_list(), "cur": str(self.cfg.get("voice") or "")}
+
+    def api_voice_use(self, body):
+        vid = str((body or {}).get("id") or "").strip()
+        if not vid:
+            return {"ok": False, "err": "缺 id"}
+        known = {v["id"] for v in self.voice_list()}
+        if vid not in known:
+            return {"ok": False, "err": "不认识的音色"}
+        self.api_cfg({"voice": vid})
+        util.log("音色切到 %s" % vid, "info", "voice")
+        return {"ok": True, "cur": vid}
+
+    def api_voice_del(self, body):
+        """从列表里删掉（云端那份也顺手删，失败不影响本地）。"""
+        vid = str((body or {}).get("id") or "").strip()
+        if not vid:
+            return {"ok": False, "err": "缺 id"}
+        lst = [x for x in (self.cfg.get("voices_custom") or [])
+               if isinstance(x, dict) and str(x.get("id")) != vid]
+        patch = {"voices_custom": lst}
+        if str(self.cfg.get("voice") or "") == vid:
+            patch["voice"] = cfgmod.VOICE_T3
+        self.api_cfg(patch)
+        try:
+            self.cloner.remove(vid)
+            util.log("云端音色已删：%s" % vid, "info", "voice")
+        except Exception as e:                           # noqa: BLE001
+            util.log("云端删除失败（本地已移除）：%r" % (e,), "warn", "voice")
+        return {"ok": True, "voices": self.voice_list(), "cur": str(self.cfg.get("voice") or "")}
+
     def api_tts_test(self, body):
         body = body or {}
         text = (body.get("text") or "こんにちは、聞こえてますか。こちらはテストです。").strip()
@@ -1697,7 +1912,8 @@ class App:
         try:
             t0 = time.time()
             r = self.mt.translate("我今天可能要迟到十分钟，你们先开吧。", src="zh", dst="ja",
-                                  card=self.cfg.get("card"))
+                                  card=self.cfg.get("card"),
+                                  custom=str(self.cfg.get("persona_custom") or ""))
             add("mt", bool(r["text"]), f"{r['ms']:.0f}ms · {r['text'][:44]}")
         except Exception as e:                          # noqa: BLE001
             add("mt", False, repr(e))

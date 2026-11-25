@@ -266,6 +266,21 @@
       <section class="card">
         <h2 class="cardhd"><span>音色</span><span class="hint" id="voiceNote">—</span></h2>
         <div class="voicechips" id="voiceChips"></div>
+        <div class="clonebox">
+          <div class="crow">
+            <input type="text" id="cloneName" placeholder="新音色叫什么都行（可空）" spellcheck="false" autocomplete="off">
+            <button class="btn" id="btnVoiceRec" title="用当前麦克风录一段自然说话，10–20 秒最稳">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M18 12a6 6 0 0 1-12 0H4a8 8 0 0 0 7 7.93V22h2v-2.07A8 8 0 0 0 20 12h-2z"/></svg>
+              录音
+            </button>
+            <button class="btn ghost" id="btnVoicePlay" title="重放刚才录的样本">试听样本</button>
+            <button class="btn primary" id="btnVoiceClone" title="上传样本到云端训练一个新音色">克隆</button>
+          </div>
+          <div class="clonestat">
+            <div class="cbar"><i id="cloneBar"></i></div>
+            <span id="cloneOut">没录过。念一段 10–20 s 自然说话（别读稿、别停顿、别有背景音）。</span>
+          </div>
+        </div>
         <div class="speedrow">
           <span class="slabel">语速</span>
           <input type="range" id="speed" min="0.6" max="1.6" step="0.02" value="1">
@@ -283,6 +298,20 @@
           </button>
         </div>
         <div class="ttsout" id="ttsOut">试听不占麦克风</div>
+      </section>
+
+      <section class="card">
+        <h2 class="cardhd"><span>人设（口吻）</span><span class="hint">只改语气 · 不改内容</span></h2>
+        <div class="voicechips" id="personaCards"></div>
+        <textarea id="personaText" rows="3" maxlength="1200" spellcheck="false"
+          placeholder="比如：你在跟老朋友连麦打游戏，说话随意、偶尔吐槽，可以用「你」称呼。&#10;别在这里写「帮我缩短」「别翻全」之类的要求——那会毁掉同传。"></textarea>
+        <div class="ttsrow">
+          <span class="hint" id="personaHint">0 / 1200</span>
+          <span class="spacer"></span>
+          <button class="btn ghost" id="btnPersonaClear">清空</button>
+          <button class="btn primary" id="btnPersonaSave">保存</button>
+        </div>
+        <div class="ttsout" id="personaOut">人设只作用于「我说的话」（A 链）；对方说的话按原口吻翻译。</div>
       </section>
 
       <section class="card">

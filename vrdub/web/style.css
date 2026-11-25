@@ -662,6 +662,20 @@ tr.st-drop{opacity:.55}
 .vchip.on{border-color:rgba(34,211,238,.6);background:rgba(34,211,238,.13)}
 .vchip.on b{color:#eafcff}
 .vchip.on span{color:#8fe4f5}
+/* 克隆音色块：录音/试听/克隆一行，下面是进度条 + 一句人话状态 */
+.clonebox{margin-top:9px;padding-top:9px;border-top:1px dashed #223040}
+.clonebox .crow{display:flex;gap:6px;align-items:center}
+.clonebox .crow input{flex:1 1 auto;min-width:0;font-size:12px;padding:5px 8px}
+.clonebox .crow .btn{flex:0 0 auto;white-space:nowrap}
+.clonestat{display:flex;gap:8px;align-items:center;margin-top:7px}
+.cbar{flex:0 0 92px;height:5px;border-radius:3px;background:#131b26;overflow:hidden}
+.cbar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#2be0d0,#2f7bff);transition:width .4s ease}
+.clonestat span{font-size:11px;color:var(--tx-3);line-height:1.35}
+.clonestat span[data-state="ok"]{color:#7ff0c0}
+.clonestat span[data-state="err"]{color:#ff9b9b}
+.clonestat span[data-state="warn"]{color:#ffd479}
+.vchip .vdel{margin-left:2px;color:#6b7f96;font:600 12px/1 var(--mono);padding:0 1px}
+.vchip .vdel:hover{color:#ff8f8f}
 .speedrow{display:flex;align-items:center;gap:9px;margin-top:9px}
 .speedrow .slabel{font-size:11px;color:var(--tx-3);flex:0 0 auto}
 .speedrow input[type=range]{flex:1 1 auto}

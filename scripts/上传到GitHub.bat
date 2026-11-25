@@ -3,22 +3,26 @@ chcp 65001 >nul
 setlocal
 cd /d "%~dp0.."
 echo.
-echo  ============================================
-echo   把本机提交推到 GitHub（断线自动重试）
-echo  ============================================
+echo  ==================================================
+echo   上传到 GitHub：Doctor-182/diyic
+echo  ==================================================
 echo.
-echo  这是可重复执行的。网络时通时断也能用：
-echo   脚本会每 12 秒重试一次，最多 60 次（约 12 分钟）。
-echo   一旦某次连通，立刻推完就退出。
+echo  走 HTTPS + 本机代理（2080 那个 sing-box），先自动探一遍端口。
+echo  第一次会问一次 token：网页打开下面这行，勾 repo，生成后粘进来。
 echo.
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0push.ps1" -Attempts 60 -GapSec 12 -Force
+echo    https://github.com/settings/tokens/new?scopes=repo^&description=VRDub
+echo.
+echo  token 只写进 %USERPROFILE%\.git-credentials，不进仓库、不进安装包。
+echo  之后每次双击本脚本都不用再填。
+echo.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0push.ps1" -Attempts 40 -GapSec 8 -Force
 echo.
 if errorlevel 1 (
-  echo  [x] 12 分钟内一次都没连上。
-  echo      1^) 先跑一次 检查GitHub连接.bat 看看是 SSH 还是 HTTPS 断
-  echo      2^) 网页能开就说明是 git 通道被拦，改用手机热点再跑本脚本
+  echo  [x] 没推上去。看 out\push.log 最后几行的报错：
+  echo      - auth problem  =^> 删掉 ~/.git-credentials 里 github 那行再跑
+  echo      - no proxy      =^> 代理没开，先开 sing-box 再跑
 ) else (
-  echo  [v] 推上去了。打开 https://github.com/Doctor-182/diyic 看一眼。
+  echo  [v] 推上去了：https://github.com/Doctor-182/diyic
 )
 echo.
 pause
