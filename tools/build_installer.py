@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 r"""打 Windows 安装包：先确保 dist\exe\VRDub 是最新的，再调 Inno Setup 出 setup.exe。
 
-Inno Setup 位置：D:\tools\InnoSetup\ISCC.exe（或环境变量 VRDUB_ISCC / 默认安装路径）。
+Inno Setup 位置：环境变量 VRDUB_ISCC → PATH 里的 iscc → 默认安装目录（含便携安装）。
 用法：
     py -3.12 tools\build_installer.py             # 用现有产物打安装包
     py -3.12 tools\build_installer.py --rebuild   # 先重新跑 build_exe.py
@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import glob
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -23,9 +24,11 @@ from vrdub import version                      # noqa: E402
 
 CANDIDATES = [
     os.environ.get("VRDUB_ISCC", ""),
-    r"D:\tools\InnoSetup\ISCC.exe",
-    r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-    r"C:\Program Files\Inno Setup 6\ISCC.exe",
+    shutil.which("iscc") or "",
+    os.path.expandvars(r"%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"),
+    os.path.expandvars(r"%ProgramFiles%\Inno Setup 6\ISCC.exe"),
+    os.path.expandvars(r"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"),
+    r"D:\tools\InnoSetup\ISCC.exe",   # 本机的便携安装（换机器一般用不到这行）
 ]
 ISS = os.path.join(ROOT, "packaging", "vrdub.iss")
 OUTDIR = os.path.join(ROOT, "dist", "installer")
@@ -46,7 +49,7 @@ def main(argv=None) -> int:
         rc = subprocess.call([sys.executable, os.path.join(HERE, "build_exe.py")], cwd=ROOT)
         if rc != 0:
             return rc
-    app_dir = os.path.join(ROOT, "dist", "exe", version and "VRDub")
+    app_dir = os.path.join(ROOT, "dist", "exe", "VRDub")
     if not os.path.isfile(os.path.join(app_dir, "VRDub.exe")):
         raise SystemExit("产物不存在：%s（先跑 tools\build_exe.py）" % app_dir)
     os.makedirs(OUTDIR, exist_ok=True)
