@@ -18,7 +18,7 @@ Det:
     inter_op_num_threads: *inter_nums
     use_cuda: false
     use_dml: false
-    model_path: D:/工作区2/_probe/pylibs/rapidocr_onnxruntime/models/ch_PP-OCRv4_det_infer.onnx
+    model_path: ch_PP-OCRv4_det_infer.onnx
     limit_side_len: 736
     limit_type: max
     std: [ 0.5, 0.5, 0.5 ]
@@ -35,7 +35,7 @@ Cls:
     inter_op_num_threads: *inter_nums
     use_cuda: false
     use_dml: false
-    model_path: D:/工作区2/_probe/pylibs/rapidocr_onnxruntime/models/ch_ppocr_mobile_v2.0_cls_infer.onnx
+    model_path: ch_ppocr_mobile_v2.0_cls_infer.onnx   # 方向分类器：项目不打包，留名字备查
     cls_image_shape: [3, 48, 192]
     cls_batch_num: 6
     cls_thresh: 0.9
@@ -46,6 +46,6 @@ Rec:
     inter_op_num_threads: *inter_nums
     use_cuda: false
     use_dml: false
-    model_path: D:/工作区2/_probe/pylibs/rapidocr_onnxruntime/models/ch_PP-OCRv4_rec_infer.onnx
+    model_path: ch_PP-OCRv4_rec_infer.onnx
     rec_img_shape: [3, 48, 320]
     rec_batch_num: 6

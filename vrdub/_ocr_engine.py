@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 r"""vrdub C 链 OCR 引擎：det 跑一次 + ch rec 主判 + ja rec 兜底（14 版实测调优）。
 
-沿用上一代实测结论（D:\工作区2\vrchat-live-dub\docs\20-读屏幕文字气泡OCR-v0.1.md）：
+沿用上一代实测结论（见 docs/ARCHITECTURE.md 的 OCR 一节）：
   * det 必须 limit_type=max：默认 min 会把小气泡按短边放大到 736，单帧 75ms → 1.3~7s。
   * **假名只有 ja 模型读得出**：ch 模型对日语气泡给 0.51~0.83 且假名全丢（只剩「！の」）。
   * **汉字只有 ch 模型读得准**：ja 模型把「不安与孤独」读成「不安与珂独」。

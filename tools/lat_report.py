@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 r"""扒数据：把 /api/metrics 与 /api/state 的逐段明细摊开，按链 + 引擎分组报数。
 
-用法（在 D:\vrc无言势 下）：
+用法（在仓库根目录下）：
     python tools\lat_report.py                # 打一次快照
     python tools\lat_report.py --watch 10     # 每 10 s 打一行增量 + 跑完再打总表
     python tools\lat_report.py --csv out\lat.csv   # 每次快照追加一行（方便丢进 Excel）

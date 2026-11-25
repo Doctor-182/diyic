@@ -2,7 +2,7 @@
 ; VRDub 无言势 · 安装包脚本（Inno Setup 6）
 ;
 ; 由 tools\build_installer.py 调用，版本号从 vrdub\version.py 传进来：
-;   ISCC.exe /DAppVer=0.9.0 /DAppVerFull=0.9.0-dev /DProjRoot=D:\vrc无言势 vrdub.iss
+;   ISCC.exe /DAppVer=0.9.0 /DAppVerFull=0.9.0-dev /DProjRoot=X:\path\to\vrdub vrdub.iss
 ;
 ; 设计取舍：
 ; - 默认装到 {autopf}\VRDub（管理员 = Program Files，普通用户 = LocalAppData\Programs），

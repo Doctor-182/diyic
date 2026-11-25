@@ -3,10 +3,10 @@ r"""C 链验证台：PySide6 造一个 700x300 黑底「VRChat 气泡」窗口�
 
 跑法（必须带 PYTHONPATH / PYTHONIOENCODING）：
 
-    $env:PYTHONPATH="D:\工作区2\_probe\pylibs"
+    $env:PYTHONPATH="<仓库>\; <仓库>\.pylibs"
     $env:PYTHONIOENCODING="utf-8"
-    Set-Location "D:\vrc无言势"
-    & "C:/Users/Lenovo/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/python/python.exe" tools\ocr_probe.py
+    Set-Location "<仓库>"
+    py -3.12 tools\ocr_probe.py
 
 它做四件事：
   1) 造窗：黑底、13px（模拟小气泡）、4 行日文（含假名）+ 1 行中文、固定坐标、置顶不被遮。

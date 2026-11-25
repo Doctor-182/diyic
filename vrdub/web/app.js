@@ -1599,7 +1599,12 @@
     }
     function loadKey() {
       if (st.demo) return;
-      apiGet("/api/env").then(function (j) { renderKey(j); });
+      apiGet("/api/env").then(function (j) {
+        renderKey(j);
+        if (j && !j.has_key) {
+          log("warn", "还没配密钥：云端识别/翻译/合成都不可用（本地识别照常出字）。去右边「密钥」卡粘一个再点保存。");
+        }
+      });
     }
     if (els.btnKeySave) {
       els.btnKeySave.addEventListener("click", function () {

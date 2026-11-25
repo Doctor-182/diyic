@@ -23,7 +23,7 @@ pl.stop()             # 幂等；Stop/Release/CoUninitialize 各一次
 
 ## 自验
 ```
-Set-Location "D:\vrc无言势"; call scripts\_env.bat
+Set-Location X:\path\to\vrdub; call scripts\_env.bat
 %PY% -u tools\procloop_check.py
 ```
 它会起一个子进程往 #18 播 4 s 440 Hz（peak 应为 gain≈0.25），再拿一个只 sleep 的进程做对照（peak 应≈0）。判据 peak>0.02 = 通；退出码 0 通过 / 1 结论不符 / 2 采集器起不来。

@@ -3,8 +3,10 @@ VRDub 无言势 · 安装说明
 一、装完之后怎么用
 1. 开始菜单（或桌面）双击「VRDub 无言势」。
 2. 浏览器会自动打开控制台 http://127.0.0.1:8899/ ；所有开关都在那一页。
-3. 第一次用要先填密钥：打开  %LOCALAPPDATA%\VRDub\config\.env.local
-   （安装目录里有一份 .env.example 形状可以照抄），填完重启程序。
+3. 第一次用要先填密钥：控制台右侧「密钥」卡 → 粘贴给你的 key（sk- 开头）→ 保存。
+   保存时会自动自检一次，显示「自检正常」就是通了，不用重启。
+   也可以手写  %LOCALAPPDATA%\VRDub\config\.env.local（形状照抄 .env.example）。
+   本安装包不含任何密钥；没填 key 时只有云端功能不可用，本地识别照常出字。
 4. 输出设备选 CABLE Input（VRChat 里把麦克风设成 CABLE Output），
    A 链：你说话 → 对方听到日语；B 链：对方说话 → 你看中文字幕。
 
