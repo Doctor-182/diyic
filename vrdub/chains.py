@@ -477,6 +477,21 @@ class StreamChain:
         # 2) 收尾句：整句重译，只把「还没说出口的尾巴」补进队列
         #    碎片单翻最容易翻错（原文 4 个字，模型只能靠猜），收尾时用整句的质量换那半秒
         full = _norm(text)
+        # 云端整段没出字（线上实测 ali HTTP 400: {}，一次能连丢十几段）：先用本地兜一次。
+        # 以前这里直接往下走，段落最后变成 src/dst 全空的 done，用户看不到任何原因；
+        # 现在能救的救回来，救不回来就明确记成 drop + 原因（见下面的空段闸）。
+        if not full and engine == "cloud" and not _cf:
+            try:
+                lt, _le, lms = self.asr.transcribe_fast(audio, lang, e="local")
+            except Exception:                    # noqa: BLE001
+                lt, lms = "", 0.0
+            lt = _norm(lt)
+            if lt:
+                self.log(f"{self.name} 云端没出字，本地兜回 '{lt[:14]}'（{lms:.0f} ms）",
+                         "warn", self.name)
+                full, engine, ms = lt, "local(兜底)", ms + float(lms or 0.0)
+            else:
+                self.log(f"{self.name} 云端没出字（{ms:.0f} ms），本地也没字", "warn", self.name)
         # 本地把词听串了（中英混排的乱码）时，宁可多花一次云端的钱换正确性：
         # 这种文本送进 MT 只会把错误放大成半中半日的译文。
         if full and not _cf and e == "hybrid" and _suspect(full) \
@@ -496,6 +511,22 @@ class StreamChain:
             self.bus.upd(bseg, src=full, state="asr",
                          asr_ms=round(ms, 1), engine=engine, vad_ms=vad_ms,
                          lvl=round(float(st.get("lvl", ev.get("lvl", -99.0))), 1))
+        if not full:
+            # 整段一个字都没有：不往下走（否则会以空 src/dst 的 done 收尾，静默失败）。
+            self._empty_n = getattr(self, "_empty_n", 0) + 1
+            dur = float(ev.get("dur", 0) or 0)
+            if self._empty_n <= 5 or self._empty_n % 20 == 0:
+                self.log(f"{self.name} 整段没识别出字（{engine or '?'}，{dur:.2f}s，"
+                         f"{ev.get('lvl', -99):.0f}dB）已跳过，累计 {self._empty_n}",
+                         "warn", self.name)
+            if bseg is not None:
+                self.bus.upd(bseg, state="drop", asr_ms=round(ms, 1), engine=engine,
+                             vad_ms=vad_ms,
+                             note=f"整段没识别出字（{engine or '?'}，{dur:.2f} 秒）："
+                                  "云端多半报错了，这段也确实没听出话，已跳过")
+            st["bus"] = None
+            self.seg = None
+            return
         # 噪声幻觉闸：太短 + 字太少 = 底噪被识别成词（实测「重气端」「重启端」这种）。
         # 宁可丢一句，也不能把噪声翻成日语念给对面听。
         thr = float(self.cfg.get("mic_db" if self.src_key == "mic" else "loop_db", -32.0))
