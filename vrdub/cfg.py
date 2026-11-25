@@ -222,12 +222,28 @@ DEFAULTS = {
 
 
 def _host_of(v: str) -> str:
-    """'https://host/path' -> 'host'（环境变量里写成 URL 也认）。"""
+    """把环境变量里的端点写成 Net 能吃的形式。
+
+    'https://host/path'  -> 'host'            （默认协议 https:443，保持旧行为）
+    'https://host:8443/' -> 'https://host:8443'
+    'http://127.0.0.1:8787' -> 'http://127.0.0.1:8787'  （自建子密钥网关常用）
+    """
     s = (v or "").strip()
-    for pre in ("https://", "http://"):
-        if s.startswith(pre):
-            s = s[len(pre):]
-    return s.split("/")[0].strip() or "token-plan.cn-beijing.maas.aliyuncs.com"
+    if not s:
+        return "token-plan.cn-beijing.maas.aliyuncs.com"
+    scheme = "https"
+    low = s.lower()
+    if low.startswith("http://"):
+        scheme, s = "http", s[7:]
+    elif low.startswith("https://"):
+        scheme, s = "https", s[8:]
+    host = s.split("/")[0].strip()
+    if not host:
+        return "token-plan.cn-beijing.maas.aliyuncs.com"
+    has_port = ":" in host and host.rsplit(":", 1)[-1].isdigit()
+    if scheme == "https" and (not has_port or host.endswith(":443")):
+        return host[:-4] if host.endswith(":443") else host
+    return scheme + "://" + host
 
 
 def _load_env(path):

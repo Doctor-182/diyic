@@ -34,7 +34,9 @@ class FakeASR:
 
 
 class FakeMT:
-    def translate(self, text, src=None, dst=None, card=None, timeout=8.0):
+    # custom= 是后来加的人设口吻参数，真 MT 有；这里必须跟着收，否则 TypeError 会被
+    # _chatbox_one 的兜底吞掉，看起来像「云端文本没被用上」。
+    def translate(self, text, src=None, dst=None, card=None, timeout=8.0, custom=""):
         time.sleep(0.05)
         return {"text": "訳「" + text[:12] + "」です"}
 

@@ -22,6 +22,26 @@ from . import util
 IDLE_DROP = 30.0
 
 
+def _parse_host(spec: str):
+    """'host' / 'https://host:8443' / 'http://127.0.0.1:8787' -> (scheme, host, port)。
+
+    裸域名一律按 https:443 处理（老行为）；自建子密钥网关可以填 http://ip:port，
+    局域网内省掉证书这一层。
+    """
+    s = str(spec or "").strip()
+    scheme = "https"
+    low = s.lower()
+    if low.startswith("http://"):
+        scheme, s = "http", s[7:]
+    elif low.startswith("https://"):
+        scheme, s = "https", s[8:]
+    host, _, port = s.split("/")[0].partition(":")
+    host = host.strip()
+    if port.isdigit():
+        return scheme, host, int(port)
+    return scheme, host, 443 if scheme == "https" else 80
+
+
 class NetError(RuntimeError):
     pass
 
@@ -44,10 +64,15 @@ class Net:
         self._lk = threading.Lock()
         self._ctx = ssl.create_default_context()
         self.stat = {"calls": 0, "errors": 0, "conn": 0}
+        self._target = _parse_host(host)
 
     # ---------------------------------------------------------------- 连接
     def _new(self, timeout):
-        c = http.client.HTTPSConnection(self.host, 443, timeout=timeout, context=self._ctx)
+        scheme, host, port = self._target
+        if scheme == "http":
+            c = http.client.HTTPConnection(host, port, timeout=timeout)
+        else:
+            c = http.client.HTTPSConnection(host, port, timeout=timeout, context=self._ctx)
         c.connect()
         with self._lk:
             self.stat["conn"] += 1
@@ -95,6 +120,7 @@ class Net:
         """换端点/换密钥后把空闲连接全丢掉（旧连接还连着老 host，不能复用）。"""
         if host:
             self.host = host
+            self._target = _parse_host(host)
         if key is not None:
             self.key = key
         with self._lk:
