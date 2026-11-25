@@ -2,7 +2,11 @@
 # ASCII only: Windows PowerShell 5.1 mis-decodes BOM-less UTF-8, and a CJK path
 # inside the script can swallow the closing quote. Root comes from the script path.
 $root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
-$log  = Join-Path $root "out\keepalive.log"
+# logs live in the user dir (%LOCALAPPDATA%\VRDub\out), never in the program dir.
+$ubase = if ($env:VRDUB_HOME) { $env:VRDUB_HOME } else { Join-Path $env:LOCALAPPDATA "VRDub" }
+$ulog  = Join-Path $ubase "out"
+if (-not (Test-Path $ulog)) { New-Item -ItemType Directory -Force -Path $ulog | Out-Null }
+$log   = Join-Path $ulog "keepalive.log"
 function Say($m) { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  $m" | Out-File -Append -Encoding utf8 $log }
 
 $listen = Get-NetTCPConnection -LocalPort 8899 -State Listen -ErrorAction SilentlyContinue

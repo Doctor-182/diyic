@@ -5,7 +5,7 @@
     python tools/pack.py                # 打到 dist/
     python tools/pack.py --no-models    # 只打代码包
 
-代码包里**包含 .env.local**（作者同意随包分发；公开发布前记得去后台禁用 key）。
+代码包里**不含 .env.local**（密钥永不随包）；只带 .env.example 模板，用的人自己填 key。
 排除：out/（日志截图）、dist/、__pycache__、models/**/*.onnx、data/settings.json、
       _probe/、%SystemDrive%/、tools/_*.py 这类一次性脚本。
 """
@@ -24,7 +24,7 @@ NAME = "vrc-dub"
 
 ROOT_FILES = [
     "README.md", "run.bat", "检查环境.bat", "评测.bat", "打包.bat",
-    "requirements.txt", "LICENSE", "CONTRIBUTING.md", ".gitignore", ".env.local",
+    "requirements.txt", "LICENSE", "CONTRIBUTING.md", ".gitignore", ".env.example",
 ]
 SRC_DIRS = ["vrdub", "docs", "tools", "models"]
 
