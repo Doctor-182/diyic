@@ -30,6 +30,7 @@ from . import server as srvmod
 from . import tts as ttsmod
 from . import util
 from . import version
+from . import paths as pathmod
 from . import asr as asr_mod
 from .asr import Transcriber
 from .vad import Segmenter
@@ -101,6 +102,11 @@ class App:
         rot = util.rotate_logs()          # 先转日志，别让上一轮的 8 MB 又长上去
         util.log(f"{version.full()} · pid={os.getpid()} · 冻结={version.frozen()} · 根目录 {ROOT}",
                  "info", "boot")
+        util.log(f"用户目录 {pathmod.HOME}（配置 {pathmod.CONFIG_DIR} · 日志 {pathmod.LOG_DIR} · "
+                 f"输出 {pathmod.OUT}）", "info", "boot")
+        moved = list(getattr(self.cfg, "migrated", []) or [])
+        if moved:
+            util.log("已从程序目录搬到用户目录：" + "、".join(moved), "info", "boot")
         if rot:
             util.log("日志轮转：" + "、".join(rot), "info", "boot")
         self._check()

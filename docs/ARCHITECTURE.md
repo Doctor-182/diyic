@@ -26,7 +26,7 @@
 |---|---|---|
 | `vrdub/app.py` | 总装：设备枚举、apply(cfg)、热键、日志、看门狗、子进程、`/api/*` 转发给 server | 所有跨模块接线都在这；改配置字段要同步 `cfg.DEFAULTS` |
 | `vrdub/server.py` | `http.server.ThreadingHTTPServer` + 路由表 + SSE | 只用标准库；UTF-8 必须显式 |
-| `vrdub/cfg.py` | 默认值、校验、`data/settings.json` 持久化、`PERSIST_SKIP` | **正确性开关不许落盘**（out_on/in_on/echo_guard/门限） |
+| `vrdub/cfg.py` | 默认值、校验、`%LOCALAPPDATA%\VRDub\config\settings.json` 持久化、`PERSIST_SKIP` | **正确性开关不许落盘**（out_on/in_on/echo_guard/门限） |
 | `vrdub/chains.py` | 一条链的全部状态机：断句、投机识别、翻译、排队、TTS、收尾重译、回声/漏音闸 | 最复杂的一块；`e2e_ms`/`open_ms` 语义在这定义 |
 | `vrdub/vad.py` | 48k→16k、10 ms hop、门限迟滞、投机/收尾分段 | 输出**一律 int16 16 kHz** |
 | `vrdub/asr.py` | 本地 SenseVoice（onnx）+ 云端 qwen-audio-asr，hybrid 融合 | `MIN_PEAK`/`MIN_SEC` 挡非语音；400 不算错误 |

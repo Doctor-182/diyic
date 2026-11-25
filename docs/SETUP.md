@@ -19,8 +19,8 @@ pip install -r requirements.txt
 ```
 
 如果这台机器上已经有别的 python 环境（比如本项目开发机用的
-`D:\工作区2\_probe\pylibs`），把那个目录设成 `PYTHONPATH` 也行，
-`run.bat` 会自己找：先看项目下 `.pylibs`，再退回 `D:\工作区2\_probe\pylibs`。
+装进项目下的 `.pylibs`），`scripts\_env.bat` 会自动把 `.pylibs` 与程序目录拼进 `PYTHONPATH`。
+解释器也不用自己指定：`_env.bat` 按 `VRDUB_PYTHON` → `.runtime\python.exe` → `py -3.12` → `py -3` → `python` 依次找。
 
 ## 2. 放模型
 
