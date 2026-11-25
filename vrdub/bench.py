@@ -23,7 +23,7 @@ from .asr import Transcriber
 from .vad import Segmenter
 
 ROOT = cfgmod.ROOT
-OUT = os.path.join(ROOT, "out")
+OUT = cfgmod.OUT            # 用户目录下的 out（%LOCALAPPDATA%\VRDub\out）
 CLIPS = os.path.join(OUT, "clips")
 
 ZH = [

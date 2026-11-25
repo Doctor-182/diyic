@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
-"""配置：默认值 + data/settings.json 覆盖 + 运行期热改。
+r"""配置：默认值 + 用户目录 settings.json 覆盖 + 运行期热改。
 
 优先级（后者赢）：
   1. 代码里的 DEFAULTS
-  2. data/settings.json（网页改过的值）
-  3. .env.local（密钥/端点用，不参与界面开关）
+  2. %LOCALAPPDATA%\VRDub\config\settings.json（网页改过的值）
+  3. %LOCALAPPDATA%\VRDub\config\.env.local（密钥/端点用，不参与界面开关）
+
+老版本写在程序目录（data\settings.json、.env.local），首次启动自动搬到用户目录，
+程序目录因此可以是只读的（装在 Program Files 里也能跑）。
 """
 from __future__ import annotations
 
@@ -14,10 +17,13 @@ import shutil
 import threading
 import time
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(ROOT, "data")
-OUT = os.path.join(ROOT, "out")
-SETTINGS = os.path.join(DATA, "settings.json")
+from . import paths as _paths
+
+_paths.ensure()
+ROOT = _paths.ROOT          # 程序目录（只读也能跑）
+DATA = _paths.CONFIG_DIR    # 用户配置目录
+OUT = _paths.OUT            # 用户目录下的 out（日志/截图/语料）
+SETTINGS = _paths.SETTINGS
 # 这些键不落盘：它们是「正确性」而不是「偏好」，被旧的调试值覆盖过一次就出事
 # （实测踩过：echo_guard=false 被持久化后，自己的日语被重新翻译了一遍）。
 PERSIST_SKIP = ("echo_guard", "mic_db", "loop_db",
@@ -204,6 +210,15 @@ DEFAULTS = {
 }
 
 
+def _host_of(v: str) -> str:
+    """'https://host/path' -> 'host'（环境变量里写成 URL 也认）。"""
+    s = (v or "").strip()
+    for pre in ("https://", "http://"):
+        if s.startswith(pre):
+            s = s[len(pre):]
+    return s.split("/")[0].strip() or "token-plan.cn-beijing.maas.aliyuncs.com"
+
+
 def _load_env(path):
     c = {}
     if os.path.exists(path):
@@ -225,14 +240,22 @@ class Cfg:
         self._lk = threading.RLock()
         self._d = dict(DEFAULTS)
         self._subs = []
-        self.env = _load_env(os.path.join(ROOT, ".env.local"))
+        # 老版本把密钥写在程序目录，搬到用户目录（只搬一次，不覆盖已有文件）
+        self.migrated = _paths.migrate()
+        self.env = _load_env(_paths.ENV_FILE)
+        if not self.env:
+            self.env = _load_env(_paths.LEGACY_ENV)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         os.makedirs(OUT, exist_ok=True)
         self._read()
         # 密钥 / 端点
         self.key = self.env.get("DASHSCOPE_TOKENPLAN_KEY", "")
-        self.host = "token-plan.cn-beijing.maas.aliyuncs.com"
+        # 端点可换：填 https://xxx/ 或只填域名都行（这里的值是套餐端点默认地址，不含任何密钥）
+        self.host = _host_of(self.env.get("DASHSCOPE_TOKENPLAN_BASE") or
+                             "token-plan.cn-beijing.maas.aliyuncs.com")
         self.payg_key = self.env.get("DASHSCOPE_PAYG_KEY", "")
+        self.payg_host = _host_of(self.env.get("DASHSCOPE_PAYG_BASE") or
+                                  "dashscope.aliyuncs.com")
 
     # ---------------------------------------------------------------- 持久化
     def _read(self):

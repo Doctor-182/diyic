@@ -19,7 +19,9 @@ import wave
 
 import numpy as np
 
-ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "out", "corpus")
+from . import paths as _paths
+
+ROOT = os.path.join(_paths.OUT, "corpus")
 _n = 0
 
 

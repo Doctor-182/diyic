@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""路径策略：程序目录只读，用户数据一律放到 %LOCALAPPDATA%\VRDub。
+r"""路径策略：程序目录只读，用户数据一律放到 %LOCALAPPDATA%VRDub。
 
 为什么要有这一层：
 - 老版本把 settings.json / 日志 / 录到的语料全写在程序目录下的 data\ 和 out\。

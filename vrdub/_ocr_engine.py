@@ -28,11 +28,21 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from . import paths as _paths
+
 # ---------------------------------------------------------------- 依赖路径
-PYLIBS_CANDIDATES = (
-    os.environ.get("VRDUB_PYLIBS") or "",
-    r"D:\工作区2\_probe\pylibs",
-)
+# 第三方库目录：环境变量 > 程序目录下的 .pylibs > 已安装（import 能找到就算）
+def _pylib_dirs() -> list:
+    dirs = []
+    env = os.environ.get("VRDUB_PYLIBS") or ""
+    if env:
+        dirs.append(env)
+    dirs.append(os.path.join(_paths.ROOT, ".pylibs"))
+    dirs.append(os.path.join(_paths.ROOT, "_pylibs"))
+    return [d for d in dirs if d]
+
+
+PYLIBS_CANDIDATES = tuple(_pylib_dirs())
 
 
 def ensure_pylibs() -> str:
@@ -53,13 +63,30 @@ def ensure_pylibs() -> str:
 
 
 # ---------------------------------------------------------------- 默认模型
+# 一律相对程序目录（models\ocr\）；找不到再回到依赖目录里翻（源码跑、没把模型放进去时）。
+def _pick(*rels: str) -> str:
+    for rel in rels:
+        p = os.path.join(_paths.ROOT, rel)
+        if os.path.isfile(p):
+            return p
+    for d in _pylib_dirs():
+        for rel in rels:
+            p = os.path.join(d, rel)
+            if os.path.isfile(p):
+                return p
+    return os.path.join(_paths.ROOT, rels[0])
+
+
+_MODEL_DIR = os.path.join(_paths.ROOT, "models", "ocr")
 DEFAULT_MODELS = {
-    "det": r"D:\工作区2\_probe\pylibs\rapidocr_onnxruntime\models\ch_PP-OCRv4_det_infer.onnx",
-    "rec_ch": r"D:\工作区2\_probe\pylibs\rapidocr_onnxruntime\models\ch_PP-OCRv4_rec_infer.onnx",
-    "rec_ja": r"D:\工作区2\vrchat-live-dub\models\ocr\japan_rec.onnx",
-    "dict_ja": r"D:\工作区2\vrchat-live-dub\models\ocr\japan_dict.txt",
-    "yaml_ch": r"D:\工作区2\vrchat-live-dub\models\ocr\config_ch.yaml",
-    "yaml_ja": r"D:\工作区2\vrchat-live-dub\models\ocr\config_ja.yaml",
+    "det": _pick("models/ocr/ch_PP-OCRv4_det_infer.onnx",
+                 "rapidocr_onnxruntime/models/ch_PP-OCRv4_det_infer.onnx"),
+    "rec_ch": _pick("models/ocr/ch_PP-OCRv4_rec_infer.onnx",
+                    "rapidocr_onnxruntime/models/ch_PP-OCRv4_rec_infer.onnx"),
+    "rec_ja": _pick("models/ocr/japan_rec.onnx"),
+    "dict_ja": _pick("models/ocr/japan_dict.txt"),
+    "yaml_ch": _pick("models/ocr/config_ch.yaml"),
+    "yaml_ja": _pick("models/ocr/config_ja.yaml"),
 }
 
 # 上一代调好的两份 yaml 的内联副本（yaml 丢了也还能跑；数值与文件一致）

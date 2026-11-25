@@ -13,8 +13,11 @@ from collections import deque
 
 import numpy as np
 
-# 项目根下的 out（日志、截图、报告都在这儿）
-OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "out")
+# 日志、截图、报告都写到用户目录（%LOCALAPPDATA%\VRDub\out），程序目录不再被写。
+from . import paths as _paths
+
+_paths.ensure()
+OUT = _paths.OUT
 try:
     os.makedirs(OUT, exist_ok=True)
 except Exception:                       # noqa: BLE001

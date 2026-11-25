@@ -39,6 +39,8 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
+from . import paths as _paths
+
 import numpy as np
 
 from ._ocr_capture import (
@@ -64,7 +66,7 @@ _TILE_OVERLAP = 24          # 块间重叠，避免把一行字切断
 _TILE_TRIGGER = 1100        # 长边超过它就分块
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_OUT = os.path.join(_ROOT, "out")
+_OUT = _paths.OUT
 
 
 def suggest_region(screen_w: Optional[int] = None, screen_h: Optional[int] = None) -> List[int]:

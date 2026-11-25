@@ -18,8 +18,10 @@ from . import util
 from . import version
 
 PORT = 8899
+from . import paths as _paths
+
 WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
-OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "out")
+OUT = _paths.OUT
 _CT = {"html": "text/html; charset=utf-8", "js": "application/javascript; charset=utf-8",
        "css": "text/css; charset=utf-8", "svg": "image/svg+xml",
        "png": "image/png", "json": "application/json; charset=utf-8"}
