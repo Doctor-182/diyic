@@ -31,6 +31,7 @@ from . import tts as ttsmod
 from . import util
 from . import version
 from . import paths as pathmod
+from . import child as childmod
 from . import asr as asr_mod
 from .asr import Transcriber
 from .vad import Segmenter
@@ -38,19 +39,13 @@ from .vad import Segmenter
 ROOT = cfgmod.ROOT
 
 # ---- 子进程不能闪黑框 -------------------------------------------------------
-# hud/danmaku/ocr_overlay 都是 Qt 程序，用 python.exe 起会在屏幕上闪三个控制台窗口。
-# 统一用同目录的 pythonw.exe（GUI 子系统）+ CREATE_NO_WINDOW：既没有窗口，也不占控制台。
-# 冻结成 exe 之后 sys.executable 就是 VRDub.exe，pythonw 探测自然落空，走原路径。
-CREATE_NO_WINDOW = 0x08000000
+# hud/danmaku/ocr_overlay 都是 Qt 程序，用 python.exe 起会在屏幕上闪控制台窗口。
+# 起步方式统一问 child 模块：源码是 pythonw.exe + 脚本，装成 exe 之后是
+# VRDub.exe --child NAME（同一个 exe 自己再进来一次，跑那个子程序就退出）。
+CREATE_NO_WINDOW = childmod.CREATE_NO_WINDOW
 
-
-def _child_py() -> str:
-    exe = sys.executable
-    if os.name == "nt" and exe.lower().endswith("python.exe"):
-        cand = os.path.join(os.path.dirname(exe), "pythonw.exe")
-        if os.path.isfile(cand):
-            return cand
-    return exe
+# 兼容老调用点（tools/dev 里的探针可能还引用它）
+_child_py = childmod.python
 
 
 class App:
@@ -725,16 +720,15 @@ class App:
         self.hud_stop()
         if not self.use_hud:
             return
-        fp = os.path.join(ROOT, "vrdub", "hud.py")
-        if not os.path.exists(fp):
-            util.log("hud.py 还不存在，浮窗跳过", "warn", "hud")
+        if not childmod.exists("hud"):
+            util.log("hud 子程序不在，浮窗跳过", "warn", "hud")
             return
         env = dict(os.environ)
         env["PYTHONIOENCODING"] = "utf-8"
         env.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
         self.hud_log = open(os.path.join(cfgmod.OUT, "hud.log"), "ab")
         try:
-            self.hud = subprocess.Popen([_child_py(), fp],
+            self.hud = subprocess.Popen(childmod.argv("hud"),
                                                     stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                                     stderr=self.hud_log, cwd=ROOT, env=env,
                                                     creationflags=CREATE_NO_WINDOW)
@@ -802,15 +796,14 @@ class App:
         self.overlay_stop()
         if not self.use_hud or not bool(self.cfg.get("ocr_overlay", True)):
             return
-        fp = os.path.join(ROOT, "vrdub", "ocr_overlay.py")
-        if not os.path.exists(fp):
-            util.log("ocr_overlay.py 不在，原位浮现跳过", "warn", "overlay")
+        if not childmod.exists("ocr_overlay"):
+            util.log("ocr_overlay 子程序不在，原位浮现跳过", "warn", "overlay")
             return
         env = dict(os.environ)
         env["PYTHONIOENCODING"] = "utf-8"
         self.overlay_log = open(os.path.join(cfgmod.OUT, "overlay.log"), "ab")
         try:
-            self.overlay = subprocess.Popen([_child_py(), fp],
+            self.overlay = subprocess.Popen(childmod.argv("ocr_overlay"),
                                                     stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                                     stderr=self.overlay_log, cwd=ROOT, env=env,
                                                     creationflags=CREATE_NO_WINDOW)
@@ -908,16 +901,15 @@ class App:
         self.danmaku_stop()
         if not self.use_hud:
             return
-        fp = os.path.join(ROOT, "vrdub", "danmaku.py")
-        if not os.path.exists(fp):
-            util.log("danmaku.py 还不存在，弹幕跳过", "warn", "danmaku")
+        if not childmod.exists("danmaku"):
+            util.log("danmaku 子程序不在，弹幕跳过", "warn", "danmaku")
             return
         env = dict(os.environ)
         env["PYTHONIOENCODING"] = "utf-8"
         env.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
         self.danmaku_log = open(os.path.join(cfgmod.OUT, "danmaku.log"), "ab")
         try:
-            self.danmaku = subprocess.Popen([_child_py(), fp],
+            self.danmaku = subprocess.Popen(childmod.argv("danmaku"),
                                                     stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                                     stderr=self.danmaku_log, cwd=ROOT, env=env,
                                                     creationflags=CREATE_NO_WINDOW)
@@ -1412,18 +1404,30 @@ class App:
         选区器给的是**逻辑像素**（Qt 坐标系），cfg 里存的是**物理像素**（抓屏坐标系），
         这里按 DPI 缩放换算，否则 150% 缩放下选区会偏到右下角。
         """
-        fp = os.path.join(ROOT, "vrdub", "region_picker.py")
-        if not os.path.exists(fp):
+        if not childmod.exists("region_picker"):
             return {"ok": False, "error": "picker_missing"}
         env = dict(os.environ)
         env["PYTHONIOENCODING"] = "utf-8"
+        out_fp = os.path.join(cfgmod.OUT, "region_pick.json")
         try:
-            pr = subprocess.run([sys.executable, fp], capture_output=True, timeout=180,
+            if os.path.exists(out_fp):
+                os.remove(out_fp)
+        except Exception:                       # noqa: BLE001
+            pass
+        try:
+            pr = subprocess.run(childmod.argv("region_picker", ["--out", out_fp]),
+                                capture_output=True, timeout=180,
                                 cwd=ROOT, env=env)
         except Exception as e:                      # noqa: BLE001
             util.log(f"选区器起不来：{e!r}", "warn", "ocr")
             return {"ok": False, "error": repr(e)}
         out = (pr.stdout or b"").decode("utf-8", "replace").strip()
+        try:
+            if os.path.exists(out_fp):
+                with open(out_fp, "r", encoding="utf-8") as fh:
+                    out = fh.read().strip() or out
+        except Exception:                       # noqa: BLE001
+            pass
         line = ""
         for ln in out.splitlines():
             if ln.strip().startswith("{"):
@@ -1622,12 +1626,16 @@ def _single_instance():
 
 
 def main(argv):
+    rc_child = childmod.run_if_child(argv)
+    if rc_child is not None:
+        return rc_child
     use_hud = "--no-hud" not in argv
     use_web = "--no-web" not in argv
     if "--force" not in argv and not _single_instance():
-        print("已经有一个 vrdub 在跑了：http://127.0.0.1:8899/ （日志 out\\srv.log）")
+        url = "http://127.0.0.1:%d/" % srvmod.PORT
+        print("已经有一个 vrdub 在跑了：%s （日志 %s）" % (url, util.OUT))
         try:
-            webbrowser.open("http://127.0.0.1:8899/")
+            webbrowser.open(url)
         except Exception:                   # noqa: BLE001
             pass
         return 0

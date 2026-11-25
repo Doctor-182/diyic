@@ -17,7 +17,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from . import util
 from . import version
 
-PORT = 8899
+# 端口默认 8899；VRDUB_PORT 可覆盖——冒烟测试/多开时用它避开正在跑的那一份。
+PORT = int(os.environ.get("VRDUB_PORT") or 8899)
 from . import paths as _paths
 
 WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")

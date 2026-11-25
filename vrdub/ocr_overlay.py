@@ -324,9 +324,11 @@ class OverlayWindow(object):
 def _demo():
     """手动演示：屏幕中部浮 3 条，译文 0.6 秒后才到（模拟真实节奏）。"""
     import subprocess
-    here = os.path.dirname(os.path.abspath(__file__))
-    p = subprocess.Popen([sys.executable, os.path.join(here, "ocr_overlay.py")],
-                         stdin=subprocess.PIPE, env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+    from . import child as childmod
+    p = subprocess.Popen(childmod.argv("ocr_overlay"),
+                         stdin=subprocess.PIPE,
+                         creationflags=childmod.CREATE_NO_WINDOW,
+                         env=dict(os.environ, PYTHONIOENCODING="utf-8"))
     def send(o):
         p.stdin.write((json.dumps(o, ensure_ascii=False) + "\n").encode("utf-8"))
         p.stdin.flush()

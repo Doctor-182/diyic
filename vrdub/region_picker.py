@@ -323,8 +323,16 @@ class Picker(QWidget):
         line = json.dumps({"region": [int(r.x()), int(r.y()),
                                       int(r.width()), int(r.height())]},
                           ensure_ascii=False)
-        sys.stdout.write(line + "\n")
-        sys.stdout.flush()
+        out = getattr(self.args, "out", "") or ""
+        if out:
+            try:
+                with open(out, "w", encoding="utf-8") as fh:
+                    fh.write(line + "\n")
+            except Exception as e:                      # noqa: BLE001
+                print("[picker] 写结果失败:", e, file=sys.stderr)
+        if sys.stdout is not None:
+            sys.stdout.write(line + "\n")
+            sys.stdout.flush()
         print("[picker] 确认:", line, file=sys.stderr)
         QApplication.exit(0)
 
@@ -397,6 +405,7 @@ class Picker(QWidget):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(add_help=True)
+    ap.add_argument("--out", default="", help="把结果 JSON 写进这个文件（打包成 exe 后没有 stdout）")
     ap.add_argument("--shot", default="", help="自动确认并把选区截图存到指定路径")
     ap.add_argument("--self-shot", default="", help="自测：抓整屏（含遮罩）后退出")
     ap.add_argument("--region", default="", help="预设选区 x,y,w,h（逻辑像素）")

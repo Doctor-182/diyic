@@ -1,0 +1,24 @@
+VRDub 无言势 · 安装说明
+
+一、装完之后怎么用
+1. 开始菜单（或桌面）双击「VRDub 无言势」。
+2. 浏览器会自动打开控制台 http://127.0.0.1:8899/ ；所有开关都在那一页。
+3. 第一次用要先填密钥：打开  %LOCALAPPDATA%\VRDub\config\.env.local
+   （安装目录里有一份 .env.example 形状可以照抄），填完重启程序。
+4. 输出设备选 CABLE Input（VRChat 里把麦克风设成 CABLE Output），
+   A 链：你说话 → 对方听到日语；B 链：对方说话 → 你看中文字幕。
+
+二、文件都在哪
+   程序本体   %LOCALAPPDATA%\Programs\VRDub（或 Program Files\VRDub，取决于你装的时候选的）
+   配置       %LOCALAPPDATA%\VRDub\config\settings.json
+   密钥       %LOCALAPPDATA%\VRDub\config\.env.local
+   日志       %LOCALAPPDATA%\VRDub\logs\
+   截图/语料  %LOCALAPPDATA%\VRDub\out\
+卸载程序不会删这些（除非你在卸载时勾选删除），重装不用重新配。
+
+三、常见问题
+- 双击没反应：先看 %LOCALAPPDATA%\VRDub\logs\ 里最新的 err.log。
+- 没有声音：控制台里确认「输出设备」是 CABLE Input、采样率 48000。
+- 想换模型/回退：models\ 目录就在程序旁边，同名文件替换即可。
+
+版本与更新：https://github.com/Doctor-182/diyic/releases

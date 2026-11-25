@@ -21,9 +21,25 @@ import numpy as np
 from . import util
 from .asr_whisper import WhisperASR
 from . import asr_engines
+from . import paths as _paths
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SV_DIR = os.path.join(ROOT, "models", "sensevoice")
+
+
+def _models_dir() -> str:
+    r"""模型根：装成 exe 之后是 exe 目录\models，源码跑是项目根\models。
+
+    为什么不能只用 __file__：冻结后 __file__ 落在 _internal\vrdub\asr.py，
+    往上两级是 _internal，而模型是跟 exe 并排放的（方便用户自己换/看体积）。
+    """
+    for cand in (os.path.join(_paths.ROOT, "models"),
+                 os.path.join(ROOT, "models")):
+        if os.path.isdir(cand):
+            return cand
+    return os.path.join(_paths.ROOT, "models")
+
+
+SV_DIR = os.path.join(_models_dir(), "sensevoice")
 ASR_PATH = "/api/v1/services/aigc/multimodal-generation/generation"
 ASR_MODEL = "qwen-audio-3.0-asr-flash"
 
