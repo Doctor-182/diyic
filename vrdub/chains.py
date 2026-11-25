@@ -225,9 +225,82 @@ class StreamChain:
         return False
 
     # ------------------------------------------------------------------ 入口
+    # ------------------------------------------------------------------ 总闸
+    def _link_off(self) -> str:
+        """这条链现在该不该干活？返回停摆原因（干活时返回 ""）。
+
+        链开关（out_on/in_on）与识别总闸（asr_on）是两个维度：链开关是「界面上关了
+        这一条」，asr_on 是「整机先别识别」。两者任一关掉，采集侧就不该再把音频喂
+        进来；这里是第二道保险，防止已经排进队列的块、或绕过采集回调的路径继续跑。
+        """
+        if not bool(self.cfg.get("asr_on", True)):
+            return "识别总闸关着"
+        key = "out_on" if self.src_key == "mic" else "in_on"
+        if not bool(self.cfg.get(key, True)):
+            return "A 链关着" if self.src_key == "mic" else "B 链关着"
+        if self.src_key == "mic" and str(self.cfg.get("mode", "trans")) == "pass":
+            # 直通 = 原声过去、不变声。老代码里 mode 根本没被读过：
+            # 选了直通照样翻译、照样把日语念出去（用户 m05780 现场踩到）。
+            return "直通模式（原声直通，不翻译）"
+        return ""
+
+    def _mt_off(self) -> str:
+        """该不该翻译？关着返回原因，开着返回 ""。"""
+        if not bool(self.cfg.get("mt_on", True)):
+            return "翻译总闸关着"
+        if self.src_key == "mic" and str(self.cfg.get("mode", "trans")) == "pass":
+            return "直通模式（不翻译）"
+        return ""
+
+    def cancel_all(self, reason="链路已关") -> int:
+        """把在途的东西全作废：输入队列、当前段、待播 TTS 队列。返回作废条数。
+
+        为什么三层都要清：用户按「停止」那一刻，已经进识别队列的块、已经拿到文本
+        排队等翻译的句子、已经排进播放器的音频，都不会自己消失 —— 观感就是
+        「关掉了还在动、还在响」。未完成的段统一留 drop 记录，事后能查到原因。
+        """
+        n = 0
+        try:
+            while True:
+                self._in_q.get_nowait()
+                n += 1
+        except queue.Empty:
+            pass
+        st = self.seg
+        if st is not None and st.get("bus") is not None:
+            self.bus.upd(st["bus"], state="drop", note=reason)
+            n += 1
+        self.seg = None
+        try:
+            while True:
+                task = self._speak_q.get_nowait()
+                if task is None:
+                    continue
+                n += 1
+                if getattr(task, "seg", None) is not None:
+                    self.bus.upd(task.seg, state="drop", note=reason)
+        except queue.Empty:
+            pass
+        self._pend.clear()
+        return n
+
+    def _off_drop(self, off: str):
+        """队列里的块在开关关掉之后才被取出来：作废当前段并留痕。"""
+        st = self.seg
+        if st is not None and st.get("bus") is not None:
+            self.bus.upd(st["bus"], state="drop", note=off + "：作废")
+        self.seg = None
+
     def on_seg(self, ev):
         """Segmenter 回调：只入队，绝不阻塞音频线程。"""
         if not self._run:
+            return
+        off = self._link_off()
+        if off:
+            self._off_n = getattr(self, "_off_n", 0) + 1
+            if self._off_n <= 3 or self._off_n % 20 == 0:
+                self.log(f"{self.name} {off}：丢掉一段音频（累计 {self._off_n} 段；"
+                         f"采集侧本不该再送，这条是保险）", "info", self.name)
             return
         try:
             if ev["kind"] == "spec":
@@ -246,6 +319,10 @@ class StreamChain:
             if item is None:
                 continue
             kind, ev = item
+            off = self._link_off()
+            if off:
+                self._off_drop(off)
+                continue
             try:
                 if kind == "partial":
                     self._on_partial(ev)
@@ -313,6 +390,8 @@ class StreamChain:
         # 字幕先动起来（本地识别 100 ms 级，观感上几乎是实时的）
         self.bus.upd(bseg, src=text, asr_ms=round(ms, 1), state="asr", engine=engine,
                      note=f"{ev['dur']:.1f}s/{util.char_count(text)}字")
+        if self._mt_off():
+            return                              # 只留原文，不翻不念
         if not self.cfg.get("live", True):
             return
         # 找可提交的气口（标点 → 语气词 → 够长就整段）
@@ -433,6 +512,15 @@ class StreamChain:
                              asr_ms=round(ms, 1), lvl=float(ev.get("lvl", -99)))
             except Exception:                    # noqa: BLE001
                 pass
+        # 翻译总闸关着（或工作模式=直通）：只把原文放到句子表，不翻、不合成、不发 chatbox。
+        # 用户 m05780 报的就是这个：全部停止之后字幕还在翻译，只是不出声。
+        _mtoff = self._mt_off()
+        if _mtoff:
+            if full and bseg is not None:
+                self.bus.upd(bseg, dst=full, state="done", note=_mtoff + "：只出原文")
+            st["bus"] = None
+            self.seg = None
+            return
         rest = full[len(st["committed"]):] if full.startswith(st["committed"]) else full
         # 麦克风听到的其实是 B 链的音源（外放 / 耳机漏音 / 一起放歌）：
         # 这时 A 段的内容和 B 段几乎一样，翻出去就是把别人的歌词念给对面听。
@@ -921,6 +1009,8 @@ class StreamChain:
         """只念、不改字幕（收尾补尾用）。"""
         if not (self.speak and self.cfg.get("out_on", True)) or not _norm(text):
             return
+        if self._mt_off():
+            return                              # 关掉翻译就不补念尾巴
         t0 = time.time()
         try:
             for piece, first_ms, echo, rate_hint in self.mt.stream_clauses(
@@ -946,6 +1036,10 @@ class StreamChain:
         """翻译一个气口并立刻排进 TTS 队列。dst 是累计的：字幕只增不减，不会「吞字」。"""
         st["last_text"] = (st["last_text"] + text) if not final else text
         if not _norm(text):
+            return
+        _mtoff = self._mt_off()
+        if _mtoff:
+            self.bus.upd(bseg, dst=st.get("dst_acc") or text, note=_mtoff + "：只出原文")
             return
         if self._is_echo(text, st):
             self.bus.upd(bseg, state="drop", echo=True,

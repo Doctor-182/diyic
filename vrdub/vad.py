@@ -165,6 +165,15 @@ class Segmenter:
         self.pre = []
         self.spec_sent = False
 
+    def reset(self):
+        """外部把这一段作废（关链路 / 关总闸 / 换设备）：清段内缓冲与预滚。
+
+        只调 _reset 不够：_reset 是「说完一句」的正常收尾，语义上不清预滚也行；
+        但关链路时不能让半截声音留在 pre 里，下一句会被拼到旧内容上。
+        """
+        self._reset()
+        self.pre = []
+
     def flush(self):
         if self.in_speech and self.buf_n > int(self.sr * 0.3):
             self._emit(time.time(), "final", time.time() - self.t_on, final=True)

@@ -28,7 +28,7 @@ SETTINGS = _paths.SETTINGS
 # （实测踩过：echo_guard=false 被持久化后，自己的日语被重新翻译了一遍）。
 PERSIST_SKIP = ("echo_guard", "mic_db", "loop_db",
                 # 开始/停止不该记到下次：调试时关了出声忘了打开，下次启动就「什么都听不到」
-                "out_on", "in_on")
+                "out_on", "in_on", "asr_on", "mt_on")
 
 VOICE_T3 = "qwen-audio-3.0-tts-plus-t3-52873432237b464a9cb3f9439c5a80b6"
 
@@ -54,6 +54,11 @@ DEFAULTS = {
     "voice": VOICE_T3,
     "out_on": True,
     "in_on": True,
+    # 两个正交总闸：链开关关的是「这条链干不干活」，总闸关的是「整机允许它干什么」。
+    # asr_on=False → 两条链都不再识别（麦克风/回环照采、电平照显示，只是不进识别器）；
+    # mt_on=False  → 只出原文，不翻、不合成、不发 chatbox（用户 m05780：全部停止时还在翻译）。
+    "asr_on": True,
+    "mt_on": True,
     "ocr_on": False,
     # C 链工作方式：hotkey = 只在按 F6/点「识别一帧」时抓一帧（推荐，不占 CPU、不误读桌面）
     #               poll   = 老行为，常驻轮询（0.35 s/帧）

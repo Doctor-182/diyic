@@ -1199,7 +1199,8 @@
   }
 
   function postChains() {
-    var body = { out_on: !!st.cfg.out_on, in_on: !!st.cfg.in_on, ocr_on: !!st.cfg.ocr_on };
+    var body = { out_on: !!st.cfg.out_on, in_on: !!st.cfg.in_on, ocr_on: !!st.cfg.ocr_on,
+                 asr_on: st.cfg.asr_on !== false, mt_on: st.cfg.mt_on !== false };
     if (st.demo) { log("info", "离线预览：链路 " + JSON.stringify(body)); return; }
     apiPost("/api/chains", body).then(function (j) {
       if (j && j.cfg) st.cfg = Object.assign({}, st.cfg, j.cfg);
@@ -1356,9 +1357,14 @@
         var v = el.getAttribute("aria-pressed") !== "true";
         el.setAttribute("aria-pressed", v ? "true" : "false");
         st.cfg[k] = v;
-        if (k === "out_on" || k === "in_on" || k === "ocr_on") {
+        if (k === "out_on" || k === "in_on" || k === "ocr_on" ||
+            k === "asr_on" || k === "mt_on") {
           postChains(); renderMaster();
-          log("info", (k === "out_on" ? "A 出" : (k === "in_on" ? "B 入" : "C 屏")) + " → " + (v ? "开" : "关"));
+          var nm = { out_on: "A 出", in_on: "B 入", ocr_on: "C 屏",
+                     asr_on: "识别总闸", mt_on: "翻译总闸" }[k] || k;
+          log("info", nm + " → " + (v ? "开" : "关"));
+          if (k === "asr_on" && !v) log("warn", "识别总闸关了：两条链都不再识别，在途的段已作废");
+          if (k === "mt_on" && !v) log("warn", "翻译总闸关了：只出原文，不合成、不发聊天框");
         } else {
           sendCfg(k, v);
           if (k === "danmaku") {

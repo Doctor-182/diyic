@@ -14,6 +14,9 @@
 - **闭麦** CapsLock 一键静音，浮窗右上角红字提示。
 - 网页控制台（SSE 实时曲线 + 全部参数热改），无需构建步骤。
 
+### 修正
+- **开关关得干净了**：新增识别总闸 `asr_on` 与翻译总闸 `mt_on`（前端「总闸」行，热生效不落盘）；A 链在采集出口加硬闸，关掉即不采集不识别；`mode=pass`（直通）终于真的直通；改开关那一刻三层队列（识别 / 待播 / 播放缓冲）里的在途全部作废并留 `drop` 原因。真值表 `tests/test_gates.py` 7 组全过。
+
 ### 交付（打包成软件）
 - **安装包**：PyInstaller onedir + Inno Setup，单文件 installer 264.5 MB，装完 591 MB，内置 252.7 MB 识别模型；朋友双击装完即可运行，不需要 Python / pip / PYTHONPATH。
 - **密钥面板**：网页控制台底部填 key → 写 `%LOCALAPPDATA%\VRDub\config\.env.local` 并当场自检；exe 与仓库里永远没有 key。

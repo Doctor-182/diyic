@@ -565,7 +565,13 @@ class App:
             if on and (bool(self.cfg.get("passthru")) or self.cfg.get("mode") == "pass"):
                 if self.player is not None:
                     self.player.push_mic(mono)
-            if on and self.seg_a is not None:
+            # 硬闸：A 链关掉 / 识别总闸关掉 / 直通模式 → 连音频都不进分段器。
+            # 以前这里只判 mic_on，于是「全部停止」之后照样识别、照样翻译、照样上字幕
+            # （用户 m05780：字幕还在翻，只是不出声）。
+            a_on = (on and bool(self.cfg.get("asr_on", True))
+                    and bool(self.cfg.get("out_on", True))
+                    and str(self.cfg.get("mode", "trans")) != "pass")
+            if a_on and self.seg_a is not None:
                 self.seg_a.feed(mono, rate)
         except Exception as e:                          # noqa: BLE001
             util.log(f"麦克风回调：{e!r}", "warn", "audio")
@@ -578,7 +584,7 @@ class App:
             _db = util.db_of(mono)
             self._env_push("loop", _db)
             self._noise_tick("loop", _db)
-            if self.seg_b is not None:
+            if self.seg_b is not None and bool(self.cfg.get("asr_on", True)):
                 self.seg_b.feed(mono, rate)
         except Exception as e:                          # noqa: BLE001
             util.log(f"回环回调：{e!r}", "warn", "audio")
@@ -1147,11 +1153,83 @@ class App:
             util.log("配置更新：" + ", ".join(f"{k}={v}" for k, v in changed.items()), "info", "cfg")
         return {"ok": True, "cfg": cfgmod.clamp_cfg(self.cfg.all())}
 
+    def _apply_chain_gates(self, keys):
+        """链开关 / 识别总闸 / 翻译总闸 / 工作模式变了：立刻把在途的活作废。
+
+        光改配置是不够的：已经进识别队列的块、已经排队等合成的句子、
+        已经塞进播放器缓冲的音频，都不会自己消失。用户按「停止」看到的
+        「还在动、还在响」全部来自这里没清。
+        """
+        asr_on = bool(self.cfg.get("asr_on", True))
+        mt_on = bool(self.cfg.get("mt_on", True))
+        mic_on = bool(self.cfg.get("mic_on", True))
+        out_on = bool(self.cfg.get("out_on", True))
+        in_on = bool(self.cfg.get("in_on", True))
+        pass_mode = str(self.cfg.get("mode", "trans")) == "pass"
+
+        # 只在「真的关掉」的那一刻清在途。这些开关共用一条 apply 路径，翻任何一个都会
+        # 重新算一遍全量状态；要是无条件清，那么「打开」也会把正在说的话砍掉，
+        # 而且会在日志里刷假的「A 链已停」（实测：麦克风本来就闭着，一改 mt_on 就误报）。
+        a_off = ((not out_on and "out_on" in keys)
+                 or (not mic_on and "mic_on" in keys)
+                 or (not asr_on and "asr_on" in keys)
+                 or (pass_mode and "mode" in keys))
+        b_off = ((not in_on and "in_on" in keys)
+                 or (not asr_on and "asr_on" in keys))
+        a_live = mic_on and asr_on and out_on and not pass_mode
+        if a_off:
+            why = ("麦克风闭着" if not mic_on
+                   else ("识别总闸关着" if not asr_on
+                         else ("直通模式（原声直通）" if pass_mode else "A 链开关关着")))
+            if self.seg_a is not None:
+                self.seg_a.reset()
+            n = 0
+            if getattr(self, "chain_a", None) is not None:
+                n = self.chain_a.cancel_all("A 链停：" + why)
+            if self.player is not None:
+                try:
+                    self.player.tts.clear()
+                    self.player.mic.clear()
+                except Exception:                   # noqa: BLE001
+                    pass
+            util.log(f"A 链已停（{why}）：在途 {n} 项作废；麦克风照采、直通照旧",
+                     "info", "cfg")
+        if b_off:
+            why = "识别总闸关着" if not asr_on else "B 链开关关着"
+            if self.seg_b is not None:
+                self.seg_b.reset()
+            n = 0
+            if getattr(self, "chain_b", None) is not None:
+                n = self.chain_b.cancel_all("B 链停：" + why)
+            util.log(f"B 链已停（{why}）：在途 {n} 项作废", "info", "cfg")
+        if not mt_on and "mt_on" in keys and a_live:
+            # 只关翻译：识别继续，只出原文；已经排好队的日语译文必须撤掉，不然还会念出来
+            n = 0
+            if getattr(self, "chain_a", None) is not None:
+                n = self.chain_a.cancel_all("翻译总闸关着：撤掉未播的译文")
+            if self.player is not None:
+                try:
+                    self.player.tts.clear()
+                except Exception:                   # noqa: BLE001
+                    pass
+            util.log(f"翻译已停：撤掉 {n} 条未播译文（识别继续，只出原文）", "info", "cfg")
+
     def apply(self, changed):
         keys = set(changed)
-        if keys & {"out_dev", "mic_dev", "loop_dev", "in_on", "mon_dev", "mon_on",
+        if keys & {"out_dev", "mic_dev", "loop_dev", "mon_dev", "mon_on",
                     "pass_on", "pass_gain", "loop_src", "loop_proc"}:
             self.reopen_audio()
+        if "in_on" in keys:
+            # B 链开关不再走「整机关音频重开」（那会把 A 链的采集也一起抖一下），
+            # 只按需起停回环这一路。
+            if bool(self.cfg.get("in_on", True)):
+                self.start_loop()
+            else:
+                self.stop_loop()
+            util.log("B 链（对方→我）" + ("开" if self.cfg.get("in_on", True) else "关"),
+                     "info", "cfg")
+        if keys & {"out_on", "in_on", "asr_on", "mt_on", "mode", "mic_on"}:
+            self._apply_chain_gates(keys)
         if "mic_on" in keys:
             self.bus.set_mic(on=bool(self.cfg.get("mic_on", True)),
                              dev=self.cfg.get("mic_dev"), reason="")
@@ -1245,9 +1323,10 @@ class App:
 
     def api_chains(self, body):
         patch = {k: bool(v) for k, v in (body or {}).items()
-                 if k in ("out_on", "in_on", "ocr_on")}
+                 if k in ("out_on", "in_on", "ocr_on", "asr_on", "mt_on")}
         self.api_cfg(patch)
-        return {"ok": True, **{k: bool(self.cfg.get(k)) for k in ("out_on", "in_on", "ocr_on")}}
+        return {"ok": True, **{k: bool(self.cfg.get(k))
+                               for k in ("out_on", "in_on", "ocr_on", "asr_on", "mt_on")}}
 
     def api_dk_preview(self, body):
         """弹幕试放：只往总线上丢一条假段，不合成、不出声、不花钱。
