@@ -83,7 +83,7 @@ class H(BaseHTTPRequestHandler):
             if path == "/api/metrics":
                 return self.app.api_metrics(self._json)
             if path == "/api/health":
-                h = {"ok": True, "ts": time.time(),
+                h = {"ok": True, "ts": time.time(), "sse": int(getattr(self.app, "sse_n", 0)),
                      "ver": version.short(), "ver_full": version.full(), "pid": os.getpid()}
                 try:
                     j = self.app.asr.ja
@@ -179,17 +179,33 @@ class H(BaseHTTPRequestHandler):
             return self._json({"ok": False, "err": repr(e)}, 500)
 
     # ---------------------------------------------------------------- SSE
+    def _chunk(self, data: bytes):
+        """HTTP/1.1 分块编码。**必须**这么发：只写裸 body 又不给 Content-Length，
+        浏览器认为 1.1 响应缺少定界（Keep-Alive 又不是 close），直接判非法 →
+        EventSource 报错 → 每 2 s 重连一次，页面就永远停在「重连中…」。
+        实测：python 客户端照样能读（它读到关闭为止），所以这个问题只在浏览器里现形。"""
+        self.wfile.write(b"%x\r\n" % len(data) + data + b"\r\n")
+        self.wfile.flush()
+
     def _sse(self):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "keep-alive")
+        self.send_header("Transfer-Encoding", "chunked")
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
         sid, q = self.app.bus.sub()
+        # 事件通道开合都记一笔：网页「一直重连」时，看日志就知道是客户端在抽风
+        # 还是服务端在关连接（一次打开一条，正常应该长时间不出现「关闭」）。
+        self.app.sse_n = int(getattr(self.app, "sse_n", 0)) + 1
+        ua = (self.headers.get("User-Agent") or "")[:40]
+        util.log(f"事件通道打开（现 {self.app.sse_n} 条，端口 {self.client_address[1]}，{ua}）",
+                 "info", "srv")
         last_hb = 0.0
         last_lv = 0.0
         try:
+            self._chunk(b"retry: 3000\n\n")
             hello = {"k": "hello", "ts": time.time(), "pid": os.getpid()}
             self._ev(hello)
             while not self.app.stopping:
@@ -212,6 +228,8 @@ class H(BaseHTTPRequestHandler):
             pass
         finally:
             self.app.bus.unsub(sid)
+            self.app.sse_n = max(0, int(getattr(self.app, "sse_n", 1)) - 1)
+            util.log(f"事件通道关闭（剩 {self.app.sse_n} 条）", "info", "srv")
             try:
                 self.close_connection = True
             except Exception:
@@ -219,8 +237,7 @@ class H(BaseHTTPRequestHandler):
 
     def _ev(self, ev):
         data = ("data: " + json.dumps(ev, ensure_ascii=False) + "\n\n").encode("utf-8")
-        self.wfile.write(data)
-        self.wfile.flush()
+        self._chunk(data)
 
 
 class _Httpd(ThreadingHTTPServer):

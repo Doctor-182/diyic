@@ -970,31 +970,98 @@
     }
   }
 
+  /* 事件通道：一条就够。
+     浏览器对同一个 host 只给 6 条连接；控制台开两三个标签页、每个标签页再挂一条
+     EventSource，排不上的那条就一直「重连中…」（本机实测：7 条 established 每 12 秒
+     全部换新端口，就是重连风暴）。所以：① 多标签页只留一条长连接，其余靠
+     BroadcastChannel 转发；② 断线退避 1.5→3→6→10 s，不再每 2 秒死磕。 */
+  var SSECH = null;
+  try { if (typeof BroadcastChannel !== "undefined") SSECH = new BroadcastChannel("vrdub-sse"); }
+  catch (e0) { SSECH = null; }
+  var TAB_ID = Math.random().toString(36).slice(2);
+  var sseLeader = false, sseFails = 0, sseLastEv = 0, leaderTimer = 0, followTimer = 0;
+
+  function sseBroadcast(msg) {
+    if (!SSECH) return;
+    try { SSECH.postMessage(msg); } catch (e) {}
+  }
+
   function connectSSE() {
     if (st.demo) return;
     disconnectSSE();
+    sseLeader = false;
+    st.follow = false;
+    if (!SSECH) { openSSE(); return; }
+    leaderTimer = setTimeout(function () {          // 250 ms 内没人应声就我来当主
+      sseLeader = true;
+      openSSE();
+      sseBroadcast({ t: "leader", id: TAB_ID });
+    }, 250);
+    sseBroadcast({ t: "who", id: TAB_ID });
+  }
+
+  if (SSECH) {
+    SSECH.onmessage = function (e) {
+      var m = e.data || {};
+      if (m.id === TAB_ID) return;
+      if (m.t === "who") { if (sseLeader) sseBroadcast({ t: "leader", id: TAB_ID }); return; }
+      if (m.t === "leader" && !sseLeader) {         // 已经有标签页连着后端
+        clearTimeout(leaderTimer);
+        st.follow = true;
+        sseLastEv = Date.now();
+        setConn("ok", liveText() + " · 共用事件通道");
+        return;
+      }
+      if (m.t === "ev" && !sseLeader) {
+        clearTimeout(leaderTimer);
+        st.follow = true;
+        sseLastEv = Date.now();
+        handleEvent(m.d);
+        setConn("ok", liveText() + " · 共用事件通道");
+      }
+    };
+  }
+
+  function openSSE() {
     var es;
     try { es = new EventSource(api("/api/events")); }
     catch (e) { log("err", "事件通道建立失败：" + e.message); return; }
     st.sse = es;
     es.onopen = function () {
+      sseFails = 0;
       setConn("ok", liveText());
       log("info", "事件通道已连接");
     };
-    es.onmessage = function (ev) { handleEvent(ev.data); };
+    es.onmessage = function (ev) {
+      sseLastEv = Date.now();
+      handleEvent(ev.data);
+      if (sseLeader) sseBroadcast({ t: "ev", id: TAB_ID, d: ev.data });
+    };
     es.onerror = function () {
-      setConn("warn", "重连中…");
-      log("warn", "事件通道断开，2 秒后重试");
+      var d = Math.min(10000, 1500 * Math.pow(2, Math.min(4, sseFails)));
+      sseFails++;
+      setConn("warn", "重连中…（" + Math.round(d / 1000) + " s）");
+      if (sseFails === 1 || sseFails % 5 === 0) {
+        log("warn", "事件通道断开第 " + sseFails + " 次，" + Math.round(d / 1000) + " 秒后重试");
+      }
       try { es.close(); } catch (e2) {}
       st.sse = null;
       clearTimeout(st.retryT);
-      st.retryT = setTimeout(connectSSE, 2000);
+      st.retryT = setTimeout(connectSSE, d);
     };
   }
+
   function disconnectSSE() {
+    clearTimeout(leaderTimer);
     if (st.sse) { try { st.sse.close(); } catch (e) {} st.sse = null; }
     clearTimeout(st.retryT);
   }
+
+  // 主的标签页被关掉后，跟随者 20 s 内收不到事件就重新选主
+  followTimer = setInterval(function () {
+    if (st.demo || sseLeader) return;
+    if (st.follow && Date.now() - sseLastEv > 20000) { st.follow = false; connectSSE(); }
+  }, 5000);
 
   /* ------------------------------ 全量状态 ------------------------------ */
   function applyState(s) {

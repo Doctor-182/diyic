@@ -1045,7 +1045,7 @@ class App:
                     "vl": int((self.ocr.stats() or {}).get("vl", 0)) if self.ocr is not None else 0,
                     "vl_ms": float((self.ocr.stats() or {}).get("last_vl_ms", 0.0)) if self.ocr is not None else 0.0,
                     "strip": bool(c.get("ocr_label_strip", False))},
-            "key": dict(getattr(self.hotkeys, "last", {}) or {}),
+            "key": dict(getattr(getattr(self, "hotkeys", None), "last", {}) or {}),
             "osc": {"on": bool(c.get("chatbox_on")), "host": c.get("osc_host"),
                     "port": c.get("osc_port"), "stat": dict(getattr(self.osc, "stat", {}) or {})},
             "last": self.bus.recent(50),
