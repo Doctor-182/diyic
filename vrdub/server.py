@@ -168,6 +168,13 @@ class H(BaseHTTPRequestHandler):
             if path == "/api/clear":
                 self.app.bus.clear()
                 return self._json({"ok": True})
+            if path == "/api/clientlog":
+                # 浏览器出问题时报一句到后端日志里：网页「一直重连」这类故障，
+                # 光看服务端只能看到连接开合，看不到浏览器给的真实原因（ERR_*）。
+                msg = str((body or {}).get("msg") or "")[:300]
+                extra = str((body or {}).get("extra") or "")[:400]
+                util.log(f"[web] {msg} {extra}", "warn", "web")
+                return self._json({"ok": True})
             if path == "/api/hud":
                 return self._json(self.app.api_hud(body))
             if path == "/api/quit":
@@ -200,7 +207,8 @@ class H(BaseHTTPRequestHandler):
         # 还是服务端在关连接（一次打开一条，正常应该长时间不出现「关闭」）。
         self.app.sse_n = int(getattr(self.app, "sse_n", 0)) + 1
         ua = (self.headers.get("User-Agent") or "")[:40]
-        util.log(f"事件通道打开（现 {self.app.sse_n} 条，端口 {self.client_address[1]}，{ua}）",
+        util.log(f"事件通道打开（现 {self.app.sse_n} 条，端口 {self.client_address[1]}，"
+                 f"{self.headers.get('Host') or '-'} {self.path}，{ua}）",
                  "info", "srv")
         last_hb = 0.0
         last_lv = 0.0
@@ -224,12 +232,16 @@ class H(BaseHTTPRequestHandler):
                 if now - last_hb >= 15.0:
                     last_hb = now
                     self._ev({"k": "hb", "ts": time.time()})
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            pass
+            why = "服务端停"
+        except (BrokenPipeError, ConnectionResetError, OSError) as e:
+            why = "对端断开 " + type(e).__name__
+        except Exception as e:                        # noqa: BLE001
+            why = "异常 " + repr(e)
         finally:
             self.app.bus.unsub(sid)
             self.app.sse_n = max(0, int(getattr(self.app, "sse_n", 1)) - 1)
-            util.log(f"事件通道关闭（剩 {self.app.sse_n} 条）", "info", "srv")
+            util.log(f"事件通道关闭（剩 {self.app.sse_n} 条，端口 {self.client_address[1]}，{why}）",
+                     "info", "srv")
             try:
                 self.close_connection = True
             except Exception:

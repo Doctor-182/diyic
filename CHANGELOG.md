@@ -23,6 +23,7 @@
 - **给别人用但不交出主密钥**：新增 `tools/relay.py` —— 主密钥留在自己机器上，对方拿 `sub-…` 子密钥打网关；校验、路径白名单、每日配额、记账、SSE 原样转发（首块不攒包）。端点支持 `http://host:port`（`vrdub/cfg.py` 的 `_host_of()` 与 `vrdub/net.py` 的 `_parse_host()`），控制台「密钥」卡可直接填网关地址。真值表 `tests/test_relay.py` 7 组 20 项全过；本机回环实测 chat 364 ms（直连 ~340 ms）、SSE 首块 292 ms。官方原生多 key（账号+地域最多 50 把、可设 IP/模型白名单）作为首选方案写进 `docs/子密钥网关.md`。
 
 ### 修正
+- **控制台不再「一直重连」**：`tryState` 连上后端后会调 `loadKey()` 拉密钥状态，可它当时被写在 `bind()` 里（局部函数），从外面调是 `ReferenceError`；这个异常被 `fetch` 的 `.catch` 吃掉，被当成「后端连不上」→ 每 3 秒重试一次、每次重开一条事件通道，服务端日志里就是开-关成对地涨、界面永远停在「重连中…」。修法：`renderKey`/`loadKey` 提到模块作用域；`tryState` 拿到 `/api/state` 之后的界面初始化整段套 `try/catch`，出 bug 只报错、不再回落到「连不上」重试；另加 `window.onerror` / `unhandledrejection` 上报到 `/api/clientlog`。实测：新建无头浏览器挂 20 秒只有 1 次打开、0 次关闭（此前 3 秒一次）。
 - **识别没出字不再假装 done**：云端整段没出字（线上实测 `ali HTTP 400: {}`，一次能连丢十几段）先用本地兜一次；本地也没字就把段落标 `drop` 并写明原因，不再以空 `src/dst` 的 `done` 静默收尾。真值表 `tests/test_empty_asr.py` 4 组全过。
 - **开关关得干净了**：新增识别总闸 `asr_on` 与翻译总闸 `mt_on`（前端「总闸」行，热生效不落盘）；A 链在采集出口加硬闸，关掉即不采集不识别；`mode=pass`（直通）终于真的直通；改开关那一刻三层队列（识别 / 待播 / 播放缓冲）里的在途全部作废并留 `drop` 原因。真值表 `tests/test_gates.py` 7 组全过。
 

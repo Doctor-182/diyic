@@ -119,6 +119,43 @@
   /* ------------------------------ API ------------------------------ */
   function api(p) { return (st.base || "") + p; }
 
+  /* 浏览器自己出问题时报一句到后端日志（服务端只能看到连接开合，看不到 ERR_*） */
+  function report(msg, extra) {
+    try { console.error("[vrdub]", msg, extra || ""); } catch (e0) {}
+    try {
+      fetch(api("/api/clientlog"), {
+        method: "POST", cache: "no-store", keepalive: true,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ msg: msg, extra: (extra || "") + " · " + location.href })
+      });
+    } catch (e) {}
+  }
+
+  /* 密钥卡：安装版里唯一必须手填的东西，写 %LOCALAPPDATA%\VRDub\config\.env.local。
+     必须放在模块作用域：tryState 连上后端后要调 loadKey()，先前它被写在 bind() 里，
+     外面调不到 → ReferenceError 被 fetch 的 catch 吃掉 → 每 3 秒重试一次、
+     每次重开一条事件通道，界面就永远停在「重连中…」。 */
+  function renderKey(j) {
+    if (!j) return;
+    if (els.keyState) {
+      setTx(els.keyState, j.has_key
+        ? ("已配置 …" + (j.tail || "") + (j.probe === "ok" ? " · 自检正常"
+          : (j.probe === "fail" ? " · 自检失败" : "")))
+        : "未配置 · 云端功能不可用");
+      els.keyState.dataset.state = j.has_key ? (j.probe === "fail" ? "warn" : "ok") : "err";
+    }
+    if (els.keyHost && !els.keyHost.value && j.host) els.keyHost.value = j.host;
+  }
+  function loadKey() {
+    if (st.demo) return;
+    apiGet("/api/env").then(function (j) {
+      renderKey(j);
+      if (j && !j.has_key) {
+        log("warn", "还没配密钥：云端识别/翻译/合成都不可用（本地识别照常出字）。去右边「密钥」卡粘一个再点保存。");
+      }
+    }).catch(function () {});
+  }
+
   function postJson(path, body) {
     return fetch(api(path), {
       method: "POST",
@@ -1029,6 +1066,7 @@
     st.sse = es;
     es.onopen = function () {
       sseFails = 0;
+      stopPollFallback();
       setConn("ok", liveText());
       log("info", "事件通道已连接");
     };
@@ -1038,9 +1076,14 @@
       if (sseLeader) sseBroadcast({ t: "ev", id: TAB_ID, d: ev.data });
     };
     es.onerror = function () {
-      var d = Math.min(10000, 1500 * Math.pow(2, Math.min(4, sseFails)));
+      var d = Math.min(fbTimer ? 30000 : 10000, 1500 * Math.pow(2, Math.min(4, sseFails)));
       sseFails++;
-      setConn("warn", "重连中…（" + Math.round(d / 1000) + " s）");
+      if (sseFails === 1) report("事件通道断开", "ready=" + es.readyState + " tab=" + TAB_ID);
+      else if (sseFails === 3) {
+        report("事件通道连断三次，转轮询", "ready=" + es.readyState + " tab=" + TAB_ID);
+        startPollFallback();          // 事件通道废了也别让控制台变成「一直重连」
+      }
+      setConn("warn", fbTimer ? "轮询模式（事件通道连不上）" : "重连中…（" + Math.round(d / 1000) + " s）");
       if (sseFails === 1 || sseFails % 5 === 0) {
         log("warn", "事件通道断开第 " + sseFails + " 次，" + Math.round(d / 1000) + " 秒后重试");
       }
@@ -1055,6 +1098,25 @@
     clearTimeout(leaderTimer);
     if (st.sse) { try { st.sse.close(); } catch (e) {} st.sse = null; }
     clearTimeout(st.retryT);
+  }
+
+  /* 兜底：事件通道连断 3 次就切成 1.5 s 轮询 /api/state。
+     界面照常用（段、指标、设备都能刷），只是不再是逐条推送。 */
+  var fbTimer = 0;
+  function startPollFallback() {
+    if (fbTimer) return;
+    log("warn", "事件通道连不上，改用 1.5 秒轮询：控制台功能不变，状态刷新慢一点");
+    fbTimer = setInterval(function () {
+      fetch(api("/api/state"), { cache: "no-store" })
+        .then(function (r) { return r.json(); })
+        .then(function (s) { st.pollOk = true; applyState(s); setConn("warn", "轮询模式（事件通道连不上）"); })
+        .catch(function () { setConn("err", "后端没响应"); });
+    }, 1500);
+  }
+  function stopPollFallback() {
+    if (!fbTimer) return;
+    clearInterval(fbTimer);
+    fbTimer = 0;
   }
 
   // 主的标签页被关掉后，跟随者 20 s 内收不到事件就重新选主
@@ -1654,25 +1716,6 @@
       });
     }
 
-
-    // 密钥：安装版里唯一必须手填的东西，写 %LOCALAPPDATA%\VRDub\config\.env.local
-    function renderKey(j) {
-      if (!j) return;
-      if (els.keyState) {
-        setTx(els.keyState, j.has_key ? ("已配置 …" + (j.tail || "") + (j.probe === "ok" ? " · 自检正常" : (j.probe === "fail" ? " · 自检失败" : ""))) : "未配置 · 云端功能不可用");
-        els.keyState.dataset.state = j.has_key ? (j.probe === "fail" ? "warn" : "ok") : "err";
-      }
-      if (els.keyHost && !els.keyHost.value && j.host) els.keyHost.value = j.host;
-    }
-    function loadKey() {
-      if (st.demo) return;
-      apiGet("/api/env").then(function (j) {
-        renderKey(j);
-        if (j && !j.has_key) {
-          log("warn", "还没配密钥：云端识别/翻译/合成都不可用（本地识别照常出字）。去右边「密钥」卡粘一个再点保存。");
-        }
-      });
-    }
     if (els.btnKeySave) {
       els.btnKeySave.addEventListener("click", function () {
         var key = (els.keyVal && els.keyVal.value || "").trim();
@@ -1893,13 +1936,19 @@
         setConn("ok", liveText());
         log("info", "已连接后端 v" + (s.ver || "?") + " · pid " + (s.pid || "?") +
           " · 已运行 " + Math.round(s.uptime_s || 0) + " 秒" + (st.base ? " · " + st.base : ""));
-        connectSSE();
-        startMetricsPoll();
-        pollMetrics();
-        loadKey();
-        if (st.autoInject && els.btnInject) {
-          log("info", "自测模式：2 秒后自动按一次「回环自测」");
-          setTimeout(function () { els.btnInject.click(); }, 2000);
+        // 状态拿到了就是连上了：后面这些是界面初始化，出 bug 只报错，绝不回落到「连不上」重试
+        try {
+          connectSSE();
+          startMetricsPoll();
+          pollMetrics();
+          loadKey();
+          if (st.autoInject && els.btnInject) {
+            log("info", "自测模式：2 秒后自动按一次「回环自测」");
+            setTimeout(function () { els.btnInject.click(); }, 2000);
+          }
+        } catch (e3) {
+          report("连上后端但初始化出错", String((e3 && e3.message) || e3));
+          log("err", "连上后端了，但界面初始化出错：" + ((e3 && e3.message) || e3));
         }
       })
       .catch(function (e) {
@@ -1928,6 +1977,14 @@
     log("info", "控制台启动，正在找后端…");
     tryState(cands, 0);
   }
+
+  window.addEventListener("error", function (e) {
+    report("页面异常", (e && e.message ? e.message + " @" + e.filename + ":" + e.lineno : String(e)));
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var r2 = e && e.reason;
+    report("未处理的 Promise 拒绝", String((r2 && (r2.stack || r2.message)) || r2).slice(0, 300));
+  });
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", boot);
