@@ -5,7 +5,32 @@
 
 不用点任何按钮就能用：双击 `run.bat` → 浏览器打开控制台 → 直接对着麦克风说话。
 
-> **依赖（这台机器已经装好了，换机器才需要重装）**：Python 3.12 + `numpy / pyaudiowpatch / onnxruntime / rapidocr-onnxruntime / opencv-python / Pillow / PySide6`（库目录 `D:\工作区2\_probe\pylibs`，或复制到项目下 `.pylibs\` 让 `run.bat` 自动优先用）；本地模型已在 `models\`；云端 key 在 `.env.local`（`DASHSCOPE_TOKENPLAN_KEY` / `_BASE`）。三件套全部走套餐端点，不额外计费。
+> **依赖**：Python 3.12 + `numpy / pyaudiowpatch / onnxruntime / rapidocr-onnxruntime / opencv-python / Pillow / PySide6`（锁版本见 `requirements.txt`；也可以把依赖装进项目下的 `.pylibs\`，脚本会自动优先用它）。本地模型在 `models\`，缺什么跑 `python tools/fetch_models.py --check`。云端 key 放 `%LOCALAPPDATA%\VRDub\config\.env.local`（首次启动会把项目目录里的 `.env.local` 自动搬过去），变量名见 `.env.example`。三件套全部走套餐端点，不额外计费。
+
+> **用户数据在哪**：配置 `%LOCALAPPDATA%\VRDub\config\settings.json`、日志 `%LOCALAPPDATA%\VRDub\logs\`、截图与语料 `%LOCALAPPDATA%\VRDub\out\`。程序目录只读也能跑（装在 `C:\Program Files` 里不会丢配置），整个 `VRDub` 目录删掉等于恢复出厂。
+
+---
+
+## 项目结构
+
+```
+vrdub/            程序本体（一个包，一条进程起全部）
+  app.py          装配与生命周期：设备绑定、子进程、HTTP 服务、看门狗
+  chains.py       A/B 两条链的调度核心（分句、投机识别、排队、回声判定）
+  asr*.py         识别：本地 SenseVoice / 云端 qwen-audio / anime-whisper 备选
+  mt.py tts.py    翻译（流式子句）与合成（套餐 tts-plus，克隆音色 t3）
+  ocr*.py         C 链：GDI 截屏 → PP-OCRv4 双模型路由 → 原位气泡
+  hud.py danmaku.py   浮窗与弹幕（独立 Qt 进程，抓屏不可见）
+  paths.py cfg.py     路径策略与配置（用户目录 / 热改 / 迁移）
+  server.py bus.py    标准库 HTTP + SSE，单机只绑 127.0.0.1:8899
+  web/            控制台（纯静态，无构建步骤）
+scripts/          启动/自检/评测/守护脚本（_env.bat 统一探测解释器）
+tools/            长期工具：延迟报表、模型检查、设备探针、注入测试
+tools/dev/        一次性探针（调试记录，随时可删）
+tests/            真值表：回声判定、云端优先、语言闸、翻译质量
+models/           本地模型（权重不入库，见 tools/fetch_models.py）
+docs/             架构、协议、部署、UI、选型与路线图
+```
 
 ---
 
@@ -26,9 +51,9 @@
 
 **崩了会自己回来**：`run.bat` 现在是个守护循环——后端因为任何原因退出（包括内存不够 MemoryError），2 秒后自动重启，网页那边的 SSE 会自己重连，不用你重新点。连续崩 20 次才停手并打印提示。同时后端自带内存看门狗：占用过 900 MB 先把本地识别模型（228 MB）放掉，过 1500 MB 就主动重启自己（比被系统强杀干净）。想改阈值：控制台 `mem_soft_mb` / `mem_hard_mb`。
 
-**只能起一个**：重复双击 `run.bat` 不会再起第二个后端（独占文件锁 `out/vrdub.lock`），第二份会直接把浏览器指向已在跑的那个。
+**只能起一个**：重复双击 `run.bat` 不会再起第二个后端（独占文件锁在用户目录 `out/vrdub.lock`），第二份会直接把浏览器指向已在跑的那个。
 
-**日志**：所有日志同时写进 `out/srv.log`（超 5 MB 自动改名 `srv.log.1`），控制台窗口关了也能事后查。
+**日志**：所有日志写进 `%LOCALAPPDATA%\VRDub\out\srv.log`（单文件超 8 MB 自动改名 `.1` 并保留一份），控制台窗口关了也能事后查。
 
 ---
 
@@ -195,7 +220,7 @@ python tools/asr_ab.py --list
 
 | 现象 | 看这里 | 处理 |
 |---|---|---|
-| 控制台打不开（浏览器「无法连接」） | `out/keepalive.log` 与 `out/srv.log` 尾部 | 先看后端还在不在：`Get-NetTCPConnection -LocalPort 8899`。**电脑睡过一觉 / 重启过，后端会跟着没**（2026-11-20 14:23 就是这样：事件 42 进入睡眠，run.bat 一起断了，睡了 13 小时）。现在有计划任务 `VRDUB-Sync`（登录时 + 每 5 分钟）跑 `tools/keepalive.ps1`：端口没监听就自动把 `run.bat nobrowser` 拉起来，日志写在 `out/keepalive.log`。手动补一次：`powershell -NoProfile -ExecutionPolicy Bypass -File tools\keepalive.ps1`；不想要自启就 `Unregister-ScheduledTask -TaskName VRDUB-Sync` |
+| 控制台打不开（浏览器「无法连接」） | `%LOCALAPPDATA%\VRDub\out\keepalive.log` 与 `srv.log` 尾部 | 先看后端还在不在：`Get-NetTCPConnection -LocalPort 8899`。**电脑睡过一觉 / 重启过，后端会跟着没**（2026-11-20 14:23 就是这样：事件 42 进入睡眠，run.bat 一起断了，睡了 13 小时）。现在有计划任务 `VRDUB-Sync`（登录时触发、之后每 5 分钟）跑 `scripts\keepalive.ps1`：端口没监听就自动把 `run.bat nobrowser` 拉起来。手动补一次：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts\keepalive.ps1`；不想要自启就 `Unregister-ScheduledTask -TaskName VRDUB-Sync` |
 | 控制台打不开（页面能开但是白的） | 浏览器 F12 的 Network | 页面本身是静态壳子，样式和脚本走 `/static/style.css`、`/static/app.js`；这两个 200 才算正常（各约 31 KB / 68 KB）。根路径下的 `/app.js`、`/style.css` 本来就该 404，壳子会自己回退到相对路径 |
 | 「麦克风打不开」 | 控制台红色徽章 + `out/err.log` | 设备被别的软件独占（VRChat / Discord / OBS）；关掉占用者，或在设备下拉里换一个 |
 | 对方听不到日语 | 「试听」有没有声 | 没声 = 输出设备不是 `CABLE Input`；有声 = VRChat 麦克风没选 `CABLE Output` |
@@ -217,8 +242,9 @@ python tools/asr_ab.py --list
 
 ```
 run.bat              启动（后端 + 浏览器控制台）
-检查环境.bat          真调一次识别 / 翻译 / 合成，写 out/selftest.md
-评测.bat              设备闭环 + 延迟评测，写 out/bench.md
+scripts\检查环境.bat   真调一次识别 / 翻译 / 合成，写 out/selftest.md
+scripts\评测.bat       设备闭环 + 延迟评测，写 out/bench.md
+scripts\延迟报表.bat   各阶段延迟均值/p50/p90（跑一段之后用它扒数据）
 vrdub/
   app.py             总装：音频、三条链、周期任务、HTTP 路由回调
   server.py          127.0.0.1:8899 的 HTTP + SSE
@@ -254,24 +280,27 @@ out/                 自检报告、评测报告、截图、录音、日志
 
 ---
 
-## 8. 打包给朋友 / 推到 GitHub
+## 8. 仓库与分发
+
+这是个**正常 git 仓库**（`main` 分支，历史从 0.9.0-dev 起），不是「一堆文件打包」。
+
+**仓库里有什么**：源码 `vrdub/`、脚本 `scripts/`、工具 `tools/`、真值表 `tests/`、文档 `docs/`、模型配置与词表、`pyproject.toml` / `requirements.txt` / `CHANGELOG.md`。提交只有 1.5 MB 量级。
+
+**仓库里没有什么**（`.gitignore` 挡住）：权重 `models/**/*.onnx|bin`、虚拟环境 `.pylibs/ _pylibs*/`、运行产物 `out/ dist/`、日志、以及**任何密钥**——`.env.local` 永不入库，模板是 `.env.example`。
+
+**别人拿到手怎么跑**：
 
 ```bat
-打包.bat            :: = python tools\pack.py，产物在 dist\
+git clone <仓库地址> vrdub && cd vrdub
+py -3.12 -m venv .venv && .venv\Scripts\pip install -r requirements.txt
+python tools\fetch_models.py --check     :: 缺什么会列出来
+copy .env.example .env.local              :: 填自己的 DASHSCOPE_TOKENPLAN_KEY
+run.bat
 ```
 
-生成两个包（解压即用的结构）：
+模型权重（228 MB + 9 MB）放 GitHub Release 附件或网盘，解压到 `models/` 即可；`tools/fetch_models.py` 能自动下 OCR 那两个。
 
-| 包 | 大小 | 里面是什么 |
-|---|---|---|
-| `dist\vrc-dub-src-<日期>.zip` | ~0.4 MB · 91 个文件 | 全部源码（`vrdub/` `tools/` `docs/` `web/`）、`run.bat`、三个 `.bat`、`README`、`requirements.txt`、`LICENSE`、`CONTRIBUTING.md`、`.gitignore`、`.env.local`（带 key，作者同意随包分发）、`models/README.md` 与模型配置 |
-| `dist\vrc-dub-models-<日期>.zip` | ~162 MB（解压 238 MB） | `models/sensevoice/{model.int8.onnx,tokens.txt}`、`models/ocr/{japan_rec.onnx,japan_dict.txt,config_*.yaml,fetch_models.py}` |
+**他的配置与他自己的 key**：默认读 `%LOCALAPPDATA%\VRDub\config\`，跟我们本机完全隔离；他的设备序号、他的 key、他的日志都在他自己的用户目录里，不会串。
 
-**给朋友的安装顺序**：解压代码包 → 把模型包里的 `models` 覆盖同名目录 → `pip install -r requirements.txt` → 双击 `run.bat`。详细步骤在 `docs/SETUP.md`。
-
-被排除的东西：`out/`（日志、截图、评测输出，330 MB / 5213 个文件）、`dist/`、`__pycache__`、`_probe/`、`data/settings.json`（设备序号是本机的）、`tools/_*.py` 一次性脚本。每个 zip 里带 `MANIFEST.txt`（逐个文件的字节数与 sha256 前 16 位）。
-
-**推 GitHub**：代码包直接 `git init && git add . && git commit` 就能推；`.gitignore` 已排掉 `out/`、`dist/`、`models/**/*.onnx`、`data/settings.json`。模型两个文件（228 MB + 9.3 MB）超 GitHub 单文件 100 MB 上限，放 Release 附件或网盘，别塞进仓库。
-
-> `.env.local` 里是**当前可用的 key**。要转公开仓库，先去百炼后台禁用再推。
+**后续软件化**：PyInstaller onedir + Inno Setup 安装包（自带 `.runtime` Python 与依赖，朋友不需要装 Python），路线见 `docs/软件化路线.md`。
 

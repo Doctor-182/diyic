@@ -8,7 +8,7 @@
 python -m vrdub.app --force   :: 忽略单实例锁，前台起后端（调试用，能看 traceback）
 ```
 
-单测式的小脚本都在 `tools/`：`leak_test.py`（语言闸）、`mt_quality.py`（翻译质量）、
+单测式的小脚本都在 `tests/`：`test_language_gate.py`（语言闸）、`test_mt_quality.py`（翻译质量）、
 `mon_player_check.py`（监听回路）、`cable_check.py`（虚拟声卡通路）、
 `procloop_check.py`（进程回环）、`ocr_probe.py`（C 链单帧）。
 

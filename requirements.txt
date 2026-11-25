@@ -1,12 +1,11 @@
-# VRChat 实时同传 —— 运行依赖（Windows / Python 3.10+，实测 3.12.14）
-# 装法：pip install -r requirements.txt
-# 说明：只用到标准库 http.client / http.server，没有 flask / aiohttp / requests。
-
-numpy>=1.26
-pyaudiowpatch>=0.2.12        # WASAPI 采集/播放（含 loopback，比 sounddevice 稳）
-PySide6>=6.6                 # 浮窗、弹幕、C 链原位浮现、框选器
-onnxruntime>=1.17            # 本地 SenseVoice 识别 + OCR
-rapidocr-onnxruntime>=1.3    # OCR 检测模型（自带中英文识别）
-opencv-python>=4.8           # OCR 预处理
-Pillow>=10.0                 # 抓屏兜底 ImageGrab
-PyYAML>=6.0                  # 读 OCR config_*.yaml
+# 运行时依赖（本机 .pylibs 里实测通过的版本，锁死以免升级踩坑）
+# 安装：python -m pip install -r requirements.txt
+# 或直接把依赖装进程序目录下的 .pylibs（便携版就是这么做的）
+numpy==2.5.5
+pyaudiowpatch==0.2.12.9
+PySide6==6.12.0
+onnxruntime==1.32.0
+rapidocr-onnxruntime==1.4.4
+opencv-python>=4.10          # .pylibs 内为源码目录形态，无 dist-info，装最新即可
+Pillow==13.0.0
+PyYAML==6.0.3

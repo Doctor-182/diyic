@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vrdub"
+version = "0.9.0"
+description = "VRChat 实时同传：中→日语音（克隆音色）+ 日→中字幕 + 屏幕文字 OCR"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "VRDub" }]
+keywords = ["vrchat", "asr", "tts", "translation", "ocr", "realtime"]
+classifiers = [
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: Microsoft :: Windows",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+
+# 运行时依赖（本机实测版本，锁在 requirements.txt）
+dependencies = [
+  "numpy>=2.0",
+  "pyaudiowpatch>=0.2.12",
+  "PySide6>=6.6",
+  "onnxruntime>=1.17",
+  "rapidocr-onnxruntime>=1.3",
+  "opencv-python>=4.8",
+  "Pillow>=10.0",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+# 开发用：起服务、打安装包、跑真值表
+dev = ["pyinstaller>=6.10"]
+
+[project.scripts]
+vrdub = "vrdub.app:main"
+
+[project.urls]
+Documentation = "https://github.com/your-name/vrdub"
+
+[tool.setuptools]
+packages = ["vrdub"]
+
+[tool.setuptools.package-data]
+vrdub = ["web/*", "web/**/*"]
