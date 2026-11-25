@@ -43,6 +43,8 @@ docs/             架构、协议、部署、UI、选型与路线图
 5. 先在控制台点「试听」——耳机里听到日语 = TTS 通了；再点「回环自测」——表格里冒出 A 链中文→日语两行 = 整条链路通了。
 6. 进 VRChat 说话。别人听到的是日语，你自己在浮窗里看到中文原文 + 日语译文。
 
+**启动就一个图标**：桌面上的「VRDub 无言势」= 后端在跑就直接开控制台页面，没跑就隐藏窗口起 `run.bat nobrowser`、等它就绪再开浏览器（不会闪黑框）。这个图标跑的是 `scripts\打开控制台.vbs`；丢了就双击 `scripts\建桌面快捷方式.ps1` 重新生成。安装包版则在开始菜单「VRDub」。
+
 **监听（自己听得见合成音）**：合成音默认同时放两路—— `CABLE Input`（给 VRChat 送出去）和你的耳机（`我的监听` 选的设备）。
 所以日语念出来的时候你自己也听得见，能当场判断音色/语速对不对。控制台「监听开关」关掉就只剩虚拟线（纯给别人听）。
 日志里应有两行：`播放开 #19 CABLE Input` 和 `监听开 #18 扬声器 (...)`。
@@ -244,6 +246,7 @@ python tools/asr_ab.py --list
 
 | 现象 | 看这里 | 处理 |
 |---|---|---|
+| 控制台右上角是「连不上后端 · 第 N 次重试」 | 后端没起或正在重启；双击桌面「VRDub 无言势」，它会拉起后端再开页面 | 页面**不会**拿假数据顶替：离线预览只在「本地 html 文件直开」时出现，那时角标会写「离线预览」且所有操作都不真的发出 |
 | 控制台打不开（浏览器「无法连接」） | `%LOCALAPPDATA%\VRDub\out\keepalive.log` 与 `srv.log` 尾部 | 先看后端还在不在：`Get-NetTCPConnection -LocalPort 8899`。**电脑睡过一觉 / 重启过，后端会跟着没**（2026-11-20 14:23 就是这样：事件 42 进入睡眠，run.bat 一起断了，睡了 13 小时）。现在有计划任务 `VRDUB-Sync`（登录时触发、之后每 5 分钟）跑 `scripts\keepalive.ps1`：端口没监听就自动把 `run.bat nobrowser` 拉起来。手动补一次：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts\keepalive.ps1`；不想要自启就 `Unregister-ScheduledTask -TaskName VRDUB-Sync` |
 | 控制台打不开（页面能开但是白的） | 浏览器 F12 的 Network | 页面本身是静态壳子，样式和脚本走 `/static/style.css`、`/static/app.js`；这两个 200 才算正常（各约 31 KB / 68 KB）。根路径下的 `/app.js`、`/style.css` 本来就该 404，壳子会自己回退到相对路径 |
 | 「麦克风打不开」 | 控制台红色徽章 + `out/err.log` | 设备被别的软件独占（VRChat / Discord / OBS）；关掉占用者，或在设备下拉里换一个 |

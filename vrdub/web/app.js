@@ -1799,8 +1799,18 @@
   }
 
   /* ------------------------------ 启动 ------------------------------ */
+  var bootTries = 0;
   function tryState(cands, i) {
-    if (i >= cands.length) { enterDemo("GET /api/state 没有响应"); return; }
+    if (i >= cands.length) {
+      // 只有「本地文件直开」才进离线预览；从 http 打开时连不上就老实报错并重试，
+      // 绝不拿假数据顶上（假数据会让人以为设备/延迟是真实读数）。
+      if (location.protocol === "file:") { enterDemo("本地文件直开，连不到后端"); return; }
+      bootTries++;
+      setConn("err", "连不上后端 · 第 " + bootTries + " 次重试");
+      log("warn", "连不上后端（" + (cands.join(" / ") || "同源") + "）：3 秒后重试。后端没起就双击桌面「VRDub 无言势」快捷方式。");
+      setTimeout(function () { tryState(cands, 0); }, 3000);
+      return;
+    }
     var base = cands[i] ? String(cands[i]).replace(/\/+$/, "") : "";
     setConn("warn", "连接中…");
     fetch(base + "/api/state", { cache: "no-store" })
