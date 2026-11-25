@@ -1501,6 +1501,10 @@ class App:
         # 顺手把「这段话听起来怎么样」报出来，前端不用自己算
         if meta["secs"] < voicemod.SEC_MIN:
             meta["hint"] = "太短了，再录长一点（≥ %.0f s）" % voicemod.SEC_MIN
+        elif meta["rms_db"] < -60.0:
+            # 全零/接近全零不是「声音小」，是设备根本没在工作（被静音或选错）
+            meta["hint"] = ("这段几乎是数字静音（%.0f dBFS）：麦克风被静音了，或者选错了设备"
+                            "——去系统音量里取消静音，或换一个输入设备再录" % meta["rms_db"])
         elif meta["rms_db"] < -34.0:
             meta["hint"] = "声音偏小（%.0f dBFS），离麦近一点或把麦克风增益调高" % meta["rms_db"]
         else:
@@ -1547,7 +1551,8 @@ class App:
             rms = float(meta.get("rms_db") or 0.0)
             if rms and rms < -46.0:
                 raise voicemod.VoiceError(
-                    "这段样本几乎是静音（%.0f dBFS）：先确认麦克风选对了、对着它说话再录" % rms)
+                    "这段样本几乎是静音（%.0f dBFS）：先确认麦克风没被静音、选的是对的那个、"
+                    "对着它说话再录（系统音量里取消静音，耳机上的静音键也看一眼）" % rms)
             voicemod.check_sample(path, secs=secs or None)
             job.update(phase="上传样本", tries=0)
             r = self.cloner.create(path, name=name or "vdub", target_model=model,
