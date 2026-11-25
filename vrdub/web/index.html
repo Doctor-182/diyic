@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VRDUB · 实时语音转译控制台</title>
+<!-- 样式：后端只在 /static/ 下服务静态文件，file:// 双击时用相对路径，两条都兜住 -->
+<script>
+(function () {
+  var cands = /^https?:/.test(location.protocol) ? ["/static/style.css", "style.css"] : ["style.css"];
+  (function next(i) {
+    if (i >= cands.length) return;
+    var l = document.createElement("link");
+    l.rel = "stylesheet";
+    l.href = cands[i];
+    l.onerror = function () { l.parentNode && l.parentNode.removeChild(l); next(i + 1); };
+    document.head.appendChild(l);
+  })(0);
+})();
+</script>
+</head>
+<body>
+<div class="app">
+
+  <!-- ===================== 顶栏 ===================== -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round">
+          <path d="M4 16h2.4M9.2 10.5v11M14.4 6.5v19M19.6 12.5v7M24.8 9.5v13M28 16h-2.4"/>
+        </svg>
+      </div>
+      <div class="brandtxt"><b>VRDUB</b><span>实时语音转译</span></div>
+    </div>
+
+    <button class="master" id="btnMaster" data-on="0" title="一键开始 / 停止全部链路">
+      <svg class="mi" viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      <span id="masterTxt">开始转译</span>
+    </button>
+
+    <div class="conn" id="conn" data-state="warn" title="后端连接状态">
+      <i class="dot"></i>
+      <span class="connText" id="connText">连接中…</span>
+      <button class="iconbtn" id="btnReconnect" title="重新拉取状态并重连" aria-label="重连">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+          <path d="M20 11a8 8 0 1 0-2.4 5.7"/><path d="M20 4v7h-7"/>
+        </svg>
+      </button>
+    </div>
+
+    <button class="micbtn" id="btnMic" data-on="1" title="切换麦克风总闸（等价 CapsLock）">
+      <span class="micicon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M12 3.5a2.8 2.8 0 0 1 2.8 2.8v5.4a2.8 2.8 0 0 1-5.6 0V6.3A2.8 2.8 0 0 1 12 3.5z"/>
+          <path d="M5.6 11a6.4 6.4 0 0 0 12.8 0"/><path d="M12 17.4V21"/>
+        </svg>
+      </span>
+      <span class="mictxt" id="micTxt">麦克风开</span>
+    </button>
+
+    <span class="capbadge" id="capBadge" hidden>
+      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M4 4l16 16"/><path d="M9 9v2a3 3 0 0 0 4.6 2.5"/><path d="M6 11a6 6 0 0 0 8.6 5.4"/><path d="M12 17.4V21"/></svg>
+      麦克风已闭
+    </span>
+
+    <span class="micwarn" id="micWarn" hidden title="">
+      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 8v5"/><path d="M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>
+      <span id="micWarnTxt">麦克风打不开</span>
+    </span>
+
+    <div class="lat" title="端到端延迟：句尾定稿 → 出声(A) / 字幕上屏(B)">
+      <div class="latbox">
+        <span class="latk">延迟 P50</span>
+        <span class="latv" id="p50">–</span>
+        <span class="latu">ms</span>
+      </div>
+      <div class="latbox">
+        <span class="latk">P90</span>
+        <span class="latv sm" id="p90">–</span>
+        <span class="latu">ms</span>
+      </div>
+      <div class="latmini">
+        <span id="latB">B 链 –</span>
+        <span class="sep">·</span>
+        <span class="dropwrap" id="dropWrap">丢段 <b id="dropN">0</b></span>
+      </div>
+    </div>
+
+    <div class="badge" id="badge" hidden>离线预览</div>
+  </header>
+
+  <!-- ===================== 三栏 ===================== -->
+  <div class="body">
+
+    <!-- ---------- 左栏 ---------- -->
+    <aside class="col left" id="left">
+
+      <section class="card chains">
+        <h2 class="cardhd"><span>三条链</span><span class="hint">点开关立即生效</span></h2>
+
+        <div class="chain" data-chain="A">
+          <div class="chd">
+            <i class="cq a"></i><b class="cname">A 出 · 我说的</b>
+            <span class="eng" id="engA">–</span>
+            <button class="sw" data-sw="out_on" aria-pressed="true" title="A 链开关：我说的话翻成对方语言"><i></i><b>OFF</b></button>
+          </div>
+          <div class="clang">
+            <select data-cfg="src_lang" title="我听懂的语种"><option value="auto">自动</option><option value="zh">中文</option><option value="ja">日语</option><option value="en">英语</option></select>
+            <span class="arrow">→</span>
+            <select data-cfg="dst_lang" title="对方听到的语种；选中文 = 原样说中文（同语言直通，不过翻译）"><option value="ja">日语</option><option value="en">英语</option><option value="ko">韩语</option><option value="zh">中文</option></select>
+          </div>
+          <div class="clang">
+            <span class="elab">识别</span>
+            <select data-cfg="asr_engine_a" title="A 链识别引擎：本地优先=低延迟 60-150ms；云端=更准但慢 1-3s">
+              <option value="hybrid">本地优先（低延迟）</option>
+              <option value="cloud">云端（更准）</option>
+              <option value="local">纯本地（离线）</option>
+            </select>
+          </div>
+          <div class="clang">
+            <button class="sw mini" data-sw="chatbox_on" aria-pressed="true" title="发到 VRChat chatbox（只用 A 链日语译文）。关掉就只出声、不打字"><i></i><b>OFF</b></button>
+            <span class="elab">聊天框</span>
+            <button class="sw mini" data-sw="a_cloud_first" aria-pressed="false" title="云端优先：本地和云端同时跑，云端在「云端优先等待」内回来就用云端的字（更准），超时直接用本地。延迟不增加"><i></i><b>OFF</b></button>
+            <span class="elab">云端优先</span>
+            <button class="sw mini" data-sw="chatbox_cloud" aria-pressed="true" title="聊天框的文本走云端识别：云端在「聊天框云端预算」内回来就用云端文本重译（默认 5 s，不赶时间求准），超时才发本地译文"><i></i><b>OFF</b></button>
+            <span class="elab">聊天框云端</span>
+          </div>
+          <div class="clive" id="liveA"><div class="ls">—</div><div class="ld">—</div></div>
+        </div>
+
+        <div class="chain" data-chain="B">
+          <div class="chd">
+            <i class="cq b"></i><b class="cname">B 入 · 对方说的</b>
+            <span class="eng" id="engB">–</span>
+            <button class="sw" data-sw="in_on" aria-pressed="true" title="B 链开关：对方的话翻成我的字幕"><i></i><b>OFF</b></button>
+          </div>
+          <div class="clang">
+            <select data-cfg="in_lang" title="对方说的语种"><option value="auto">自动</option><option value="ja">日语</option><option value="en">英语</option><option value="zh">中文</option></select>
+            <span class="arrow">→</span>
+            <select data-cfg="sub_lang" title="我看到的字幕语种"><option value="zh">中文</option><option value="ja">日语</option><option value="en">英语</option></select>
+          </div>
+          <div class="clang">
+            <span class="elab">识别</span>
+            <select data-cfg="asr_engine_b" title="B 链识别引擎：本地优先=143-351 ms 先出字幕（推荐），云端=准但抖动 0.3-13 s">
+              <option value="cloud">云端（更准，抖动大）</option>
+              <option value="hybrid">本地优先（低延迟，推荐）</option>
+              <option value="local">纯本地（离线）</option>
+            </select>
+            <select data-cfg="asr_refine" title="定稿精修（只改字幕，不影响出声）：云端最准（相似度 1.000，异步 1-5 s）；本地 anime-whisper 在显卡上 0.35 s，离线也能用，但会写错同音汉字（0.968）">
+              <option value="auto">精修：云端优先（推荐）</option>
+              <option value="cloud">精修：只用云端</option>
+              <option value="whisper">精修：只用本地显卡</option>
+              <option value="off">精修：关</option>
+            </select>
+          </div>
+          <div class="clive" id="liveB"><div class="ls">—</div><div class="ld">—</div></div>
+        </div>
+
+        <div class="chain" data-chain="C">
+          <div class="chd">
+            <i class="cq c"></i><b class="cname">C 屏 · 聊天框</b>
+            <span class="eng" id="engC">OCR</span>
+            <button class="sw" data-sw="ocr_on" aria-pressed="false" title="C 链开关：读聊天框文字并翻译"><i></i><b>OFF</b></button>
+          </div>
+          <div class="cmodes" id="ocrModes">
+            <button class="pill" data-ocrmode="hotkey" aria-pressed="false"
+                    title="只在按 小键盘 + / 点「识别一帧」时抓一帧 —— 不常驻占 CPU，聊天框不动时最省">按一下识别一帧</button>
+            <button class="pill" data-ocrmode="poll" aria-pressed="false"
+                    title="老的常驻轮询：每 0.35 s 抓一帧，字幕自己冒出来">常驻识别</button>
+          </div>
+          <div class="ocrrow">
+            <label class="elab" for="ocrSrc">屏幕上</label>
+            <select id="ocrSrc" title="屏幕上是什么语言：自动 = 由 OCR 结果自己判断（多语种混合时选自动）">
+              <option value="auto">自动判断</option>
+              <option value="ja">日语</option>
+              <option value="en">英语</option>
+              <option value="zh">中文</option>
+              <option value="ko">韩语</option>
+              <option value="ru">俄语</option>
+              <option value="other">其它（视觉抄字）</option>
+            </select>
+            <button class="btn sm" id="btnPick" title="全屏框选聊天框范围（等同全局热键 小键盘 -）">框选范围</button>
+            <button class="btn sm ghost" id="btnOnce" title="只识别当前这一帧（等同全局热键 小键盘 +）">识别一帧</button>
+          </div>
+          <div class="ocrnote" id="ocrNote">—</div>
+          <div class="clive" id="liveC"><div class="ls">—</div><div class="ld">—</div></div>
+          <div class="chint" id="hintC">—</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2 class="cardhd"><span>电平</span><span class="hint" id="levelHint">门限 –</span></h2>
+        <div class="levels">
+          <div class="lvl">
+            <div class="lvlhead"><span>我的麦克风</span><b id="dbMic">–∞ dB</b></div>
+            <div class="track">
+              <div class="rzone"></div>
+              <div class="fill" id="fillMic"></div>
+              <i class="gate" id="gateMic"></i>
+            </div>
+          </div>
+          <div class="lvl">
+            <div class="lvlhead"><span>对方声音</span><b id="dbLoop">–∞ dB</b></div>
+            <div class="track">
+              <div class="rzone"></div>
+              <div class="fill" id="fillLoop"></div>
+              <i class="gate" id="gateLoop"></i>
+            </div>
+          </div>
+        </div>
+        <div class="scale"><span>−60</span><span>−40</span><span>−20</span><span>0 dB</span></div>
+      </section>
+
+      <section class="card">
+        <h2 class="cardhd"><span>声音通道</span>
+          <button class="iconbtn" id="btnDev" title="重新扫描设备">↻ 刷新</button>
+        </h2>
+        <div class="devrow">
+          <label>我的麦克风</label>
+          <select id="selMicDev" data-cfg="mic_dev"><option value="">—</option></select>
+        </div>
+        <div class="devrow">
+          <label>对方听到 <span class="hint">VB-Cable</span></label>
+          <select id="selOutDev" data-cfg="out_dev"><option value="">—</option></select>
+        </div>
+        <div class="devrow">
+          <label>对方声音 <span class="hint">内录</span></label>
+          <select id="selLoopDev" data-cfg="loop_dev"><option value="">—</option></select>
+        </div>
+        <div class="devrow">
+          <label>我的监听 <span class="hint">听得见合成音</span></label>
+          <select id="selMonDev" data-cfg="mon_dev"><option value="">—</option></select>
+        </div>
+        <div class="devrow">
+          <label>监听开关</label>
+          <label class="sw"><input type="checkbox" id="chkMonOn" data-cfg="mon_on" checked><span>合成音同时放一份到我的耳机</span></label>
+        </div>
+        <div class="btnrow">
+          <button class="btn ghost" id="btnDevTest" title="在对方听到的设备上放一段测试音">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M3 10v4h3l4 4V6L6 10H3zm12.5 2a3.5 3.5 0 0 0-2-3.15v6.3a3.5 3.5 0 0 0 2-3.15zM14 3.2v2.1a6.8 6.8 0 0 1 0 13.4v2.1a8.9 8.9 0 0 0 0-17.6z"/></svg>
+            测听
+          </button>
+          <span class="hint" id="devHint">先说一句，电平条动了就说明通了</span>
+        </div>
+        <div class="injectrow">
+          <input type="text" id="injectText" placeholder="留空 = 默认中文句" spellcheck="false" autocomplete="off">
+          <button class="btn primary" id="btnInject" title="后端自己合成这句话从「对方听到」的设备播出去，让 A 链真的走一圈（麦→识别→翻译→日语出声）">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 12a8 8 0 0 1 13.7-5.7"/><path d="M20 12a8 8 0 0 1-13.7 5.7"/><path d="M17.5 3.5v3.2h-3.2"/><path d="M6.5 20.5v-3.2h3.2"/></svg>
+            回环自测
+          </button>
+        </div>
+        <div class="injectout" id="injectOut">自检：往对方的设备播一句中文，看句子表里 A 链有没有接住</div>
+      </section>
+
+      <section class="card">
+        <h2 class="cardhd"><span>音色</span><span class="hint" id="voiceNote">—</span></h2>
+        <div class="voicechips" id="voiceChips"></div>
+        <div class="speedrow">
+          <span class="slabel">语速</span>
+          <input type="range" id="speed" min="0.6" max="1.6" step="0.02" value="1">
+          <b id="speedVal">1.00×</b>
+        </div>
+        <textarea id="ttsText" rows="2" spellcheck="false">今日はちょっと遅れちゃった、ごめんね。</textarea>
+        <div class="ttsrow">
+          <select id="ttsLang" title="试听语言">
+            <option value="ja">日语</option><option value="zh">中文</option><option value="en">英语</option>
+          </select>
+          <label class="chk"><input type="checkbox" id="ttsPlay" checked><span>出声</span></label>
+          <button class="btn primary" id="btnTts">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            试听
+          </button>
+        </div>
+        <div class="ttsout" id="ttsOut">试听不占麦克风</div>
+      </section>
+
+      <section class="card">
+        <h2 class="cardhd"><span>识别参数</span><span class="hint">拖动即时生效</span></h2>
+        <div class="params" id="params"></div>
+      </section>
+
+      <section class="card">
+        <h2 class="cardhd"><span>延迟阀 / 窗口</span><span class="hint">全部热生效 · 自己试</span></h2>
+        <div class="params" id="latparams"></div>
+        <div class="swrow">
+          <span class="swk">预合成（先猜后半句的音频）</span>
+          <button class="sw" data-sw="presynth" aria-pressed="true"><i></i><b>OFF</b></button>
+        </div>
+        <div class="swrow">
+          <span class="swk">投机竞速（本地/云端同时跑，谁先回用谁）</span>
+          <button class="sw" data-sw="asr_race" aria-pressed="false"><i></i><b>OFF</b></button>
+        </div>
+        <div class="swrow">
+          <span class="swk">定稿精修（只改字幕，不重念）</span>
+          <button class="sw" data-sw="refine" aria-pressed="true"><i></i><b>OFF</b></button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2 class="cardhd"><span>浮窗</span>
+          <span class="spacer"></span>
+          <button class="iconbtn" id="btnHudReset" title="浮窗回到屏幕底部中间">复位</button>
+        </h2>
+        <div class="swrow">
+          <span class="swk">在屏幕上显示浮窗</span>
+          <button class="sw" data-sw="hud_on" aria-pressed="true"><i></i><b>OFF</b></button>
+        </div>
+        <div class="swrow">
+          <span class="swk">可拖动（关＝鼠标穿透）</span>
+          <button class="sw" data-sw="hud_click" aria-pressed="false"><i></i><b>OFF</b></button>
+        </div>
+        <div class="params" id="hudparams"></div>
+      </section>
+
+      <section class="card">
+        <h2 class="cardhd"><span>弹幕</span><span class="hint">改完立刻飘给你看</span>
+          <span class="spacer"></span>
+          <button class="iconbtn" id="btnDkTry" title="不合成、不出声，只飘一条给你看样式">飘一条</button>
+        </h2>
+        <div class="swrow">
+          <span class="swk">弹幕（译文从屏幕上飘过）</span>
+          <button class="sw" data-sw="danmaku" aria-pressed="false"><i></i><b>OFF</b></button>
+        </div>
+        <div class="hint" id="danmHint">全屏透明 · 鼠标穿透 · 上 1/4 区域 · 最多 6 条</div>
+        <div class="grid2">
+          <div class="field"><label>样式</label>
+            <select data-cfg="danmaku_style">
+              <option value="card">卡片（深底 + 链色条）</option>
+              <option value="plain">纯描边（白字黑边，无底板）</option>
+              <option value="bar">色条（只留左侧链色条）</option>
+              <option value="neon">发光（链色 + 外发光）</option>
+            </select>
+          </div>
+          <div class="field"><label>副行原文</label>
+            <button class="sw" data-sw="danmaku_src" aria-pressed="true"><i></i><b>OFF</b></button>
+          </div>
+        </div>
+        <div class="params" id="dkparams"></div>
+      </section>
+
+      <section class="card">
+        <h2 class="cardhd"><span>高级</span><span class="hint">一般不用动</span></h2>
+        <div class="grid2">
+          <div class="field"><label>工作模式</label>
+            <select data-cfg="mode">
+              <option value="trans">翻译</option>
+              <option value="pass">直通（不变声）</option>
+            </select>
+          </div>
+          <div class="field"><label>识别方式（两条链一起改）</label>
+            <select data-cfg="asr_engine">
+              <option value="hybrid">本地 + 云端校正</option>
+              <option value="local">只用本地</option>
+              <option value="cloud">只用云端</option>
+            </select>
+          </div>
+        </div>
+        <div class="checkrow">
+          <label class="chk"><input type="checkbox" data-cfg="presynth" data-type="bool" checked><span>预翻译</span></label>
+          <label class="chk"><input type="checkbox" data-cfg="echo_guard" data-type="bool" checked><span>回声拦截</span></label>
+          <label class="chk"><input type="checkbox" data-cfg="asr_race" data-type="bool"><span>双路识别</span></label>
+        </div>
+      </section>
+
+    </aside>
+
+    <!-- ---------- 主区：实时句子 ---------- -->
+    <main class="main">
+      <section class="card tablecard">
+        <div class="tablehd">
+          <h2><span class="live"></span>实时句子</h2>
+          <span class="count" id="segCount">0 句</span>
+          <div class="filters" id="filters">
+            <button class="chip on" data-f="all">全部</button>
+            <button class="chip" data-f="A">A 出</button>
+            <button class="chip" data-f="B">B 入</button>
+            <button class="chip" data-f="C">C 屏</button>
+          </div>
+          <span class="spacer"></span>
+          <button class="iconbtn" id="btnClearRows" title="清空后端句子表和指标（日志保留）">清空</button>
+        </div>
+        <div class="tablewrap" id="tablewrap">
+          <table id="segTable">
+            <colgroup>
+              <col style="width:70px"><col style="width:40px">
+              <col><col>
+              <col style="width:56px"><col style="width:56px"><col style="width:56px">
+              <col style="width:48px"><col style="width:48px"><col style="width:104px">
+            </colgroup>
+            <thead>
+              <tr>
+                <th>时间</th><th>链</th><th>原文</th><th>译文</th>
+                <th class="num">识别<i>ms</i></th><th class="num">翻译<i>ms</i></th><th class="num">合成<i>ms</i></th>
+                <th class="num">句长<i>s</i></th><th class="num">实时率</th><th>备注</th>
+              </tr>
+            </thead>
+            <tbody id="segBody"></tbody>
+          </table>
+          <div class="empty" id="empty">等待第一句…</div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ---------- 右栏 ---------- -->
+    <aside class="col right" id="right">
+
+      <section class="card">
+        <h2 class="cardhd"><span>延迟分解</span><span class="hint" id="mtHint">P50 · 最近 0 句</span></h2>
+        <div class="mtab" id="mtab"></div>
+      </section>
+
+      <section class="card grow">
+        <h2 class="cardhd"><span>事件日志</span><span class="spacer"></span>
+          <label class="chk tiny"><input type="checkbox" id="logAuto" checked><span>自动滚底</span></label>
+          <button class="iconbtn" id="btnLogClear" title="清空日志">✕</button>
+        </h2>
+        <div class="logs" id="logs"></div>
+      </section>
+
+      <section class="card">
+        <h2 class="cardhd"><span>C 链 · 精确标定</span><span class="hint">物理像素</span></h2>
+        <div class="ocrgrid">
+          <div class="field"><label>x</label><input type="number" id="ocrX" value="0" min="0" step="1"></div>
+          <div class="field"><label>y</label><input type="number" id="ocrY" value="0" min="0" step="1"></div>
+          <div class="field"><label>宽</label><input type="number" id="ocrW" value="0" min="0" step="1"></div>
+          <div class="field"><label>高</label><input type="number" id="ocrH" value="0" min="0" step="1"></div>
+        </div>
+        <div class="btnrow">
+          <button class="btn" id="btnOcrSave">用这四个数</button>
+          <button class="btn ghost" id="btnOcrTest">识别一帧</button>
+        </div>
+        <div class="ocrout" id="ocrOut">未标定</div>
+      </section>
+
+      <section class="card">
+        <h2 class="cardhd"><span>系统</span></h2>
+        <div class="kv" id="sysInfo">
+          <div><span>后端</span><b id="sysPid">—</b></div>
+          <div><span>版本</span><b id="sysVer">—</b></div>
+          <div><span>运行</span><b id="sysUp">—</b></div>
+          <div><span>浮窗</span><b id="sysHud">—</b></div>
+          <div><span>弹幕</span><b id="sysDanmaku">—</b></div>
+          <div><span>麦克风</span><b id="sysMic">—</b></div>
+        </div>
+      </section>
+
+    </aside>
+  </div>
+</div>
+<!-- 脚本：同上，/static/ 优先，失败退相对路径（file:// 直开 / http.server 静态目录都能跑） -->
+<script>
+(function () {
+  var cands = /^https?:/.test(location.protocol) ? ["/static/app.js", "app.js"] : ["app.js"];
+  (function next(i) {
+    if (i >= cands.length) return;
+    var s = document.createElement("script");
+    s.src = cands[i];
+    s.onerror = function () { s.parentNode && s.parentNode.removeChild(s); next(i + 1); };
+    document.body.appendChild(s);
+  })(0);
+})();
+</script>
+</body>
+</html>

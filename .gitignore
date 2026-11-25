@@ -1,0 +1,42 @@
+# ---- 运行时产物 ----
+out/
+dist/
+*.log
+*.log.1
+
+# ---- 密钥（绝不入库）----
+.env.local
+.env
+*.env.local
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pylibs/
+_pylibs/
+_pylibs_ct2_*/
+_pylibs_cuda/
+_probe/
+
+# ---- 本地模型权重（>1 GB，单独分发）----
+models/**/*.onnx
+models/**/*.bin
+models/**/.cache/
+models/anime-whisper-ct2-int8/
+
+# ---- 机器相关设置（设备序号/门限随机器不同）----
+data/settings.json
+data/*.bak
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
+%SystemDrive%/
+
+# ---- 音频/截图样本 ----
+*.wav
+out/
