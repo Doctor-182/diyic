@@ -30,6 +30,7 @@
 | `vrdub/chains.py` | 一条链的全部状态机：断句、投机识别、翻译、排队、TTS、收尾重译、回声/漏音闸 | 最复杂的一块；`e2e_ms`/`open_ms` 语义在这定义 |
 | `vrdub/vad.py` | 48k→16k、10 ms hop、门限迟滞、投机/收尾分段 | 输出**一律 int16 16 kHz** |
 | `vrdub/asr.py` | 本地 SenseVoice（onnx）+ 云端 qwen-audio-asr，hybrid 融合 | `MIN_PEAK`/`MIN_SEC` 挡非语音；400 不算错误 |
+| `vrdub/asr_gguf.py` | GGUF 三档（qwen17 / qwen06 / fun）：transcribe.cpp + CUDA/Vulkan，**一次只驻留一个** | CUDA 靠 `ggml-cuda.dll` 裸名找 `cublas64_12.dll`，**只认 PATH**；换档要释放上一个 |
 | `vrdub/mt.py` | MT：非流式整句 + 流式子句；回声重试、语言闸、强约束重翻、同语言直通 | 目标语不对宁可不出声，别把中文当日语念 |
 | `vrdub/tts.py` | qwen-audio-tts-plus，SSE 收 PCM 24k | 首包 ~750 ms 是 API 地板，与文本长度无关 |
 | `vrdub/net.py` | 「借出即独占」连接池（每请求一条连接，LIFO，空闲 30 s 换新） | 流式必须独占，否则串包 |
@@ -39,7 +40,11 @@
 | `vrdub/vlocr.py` | 视觉抄字（把裁图直接丢多模态模型） | 只在本地念不出来 / 覆盖不全时用 |
 | `vrdub/hotkey.py` | 热键：RegisterHotKey 优先 + 粘滞位轮询兜底 | 非活动桌面下 GetAsyncKeyState 全 0 |
 | `vrdub/hud.py` / `danmaku.py` / `ocr_overlay.py` / `region_picker.py` | 四个独立 Qt 进程，靠 stdin 行 JSON 驱动 | 都调了 `util.hide_from_capture`，否则会被自己抓屏再 OCR 一遍 |
-| `vrdub/bus.py` / `metrics.py` / `util.py` / `persona.py` | 内存总线、延迟统计、工具（文本清洗/语言判定/重采样）、人设卡 | `util.lang_ok` 是所有语言闸的地基 |
+| `vrdub/bus.py` / `metrics.py` / `util.py` / `persona.py` | 内存总线、延迟统计、工具（文本清洗/语言判定/重采样）、人设卡 | `util.lang_ok` 是所有语言闸的地基；`util.lang_why` 给它的人话原因（漂移守卫用） |
+| `vrdub/voices.py` | 音色克隆：样本转码 → 上传 → 训练轮询 → 本地音色表 | 套餐端点打复刻接口是 404，必须按量 key |
+| `vrdub/paths.py` | 程序目录 vs 用户目录（`%LOCALAPPDATA%\VRDub`）、老配置迁移、`VRDUB_HOME`/`VRDUB_ROOT` 覆盖 | 程序目录可能只读，一切写入走用户目录 |
+| `vrdub/child.py` | 子进程调度：源码态 `pythonw -m`，冻结态 `VRDub.exe --child NAME` | 新增 Qt 子进程必须同时加进 `HIDDEN`，否则打包后 ModuleNotFoundError |
+| `vrdub/version.py` | 版本号/构建时间/是否冻结 | 发版只改这一个文件 |
 
 ## 线程模型（一个进程里）
 

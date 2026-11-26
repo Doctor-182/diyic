@@ -27,6 +27,12 @@
 - 踩过的坑写进 README §2：CUDA 版 `ggml-cuda.dll` 用裸名 `LoadLibraryA` 找 cublas，**只认 PATH**；直接摊开的 wheel 没有 dist-info 就没有 entry point，必须显式设 `TRANSCRIBE_LIBRARY`。
 - 新增真值表 `tests/test_gguf_engine.py`（8 组：换档卸载、同档不重载、缺文件、解码自重复、没出字回退 local(兜底)、B 链聊天框不重听、clamp 白名单）。
 
+### 修正（语种漂移与文档）
+- **语种漂移守卫**：GGUF 档（尤其 1.7B 唱歌/叠 BGM 时）会把日语吐成英文或罗马字（极端条件实测 10 段唱段里 6 段漂移），然后被当英文翻成英文腔中文。现在出字后先过 `util.lang_why`：假名/汉字/拉丁占比不达标 → 用 SenseVoice 重听一次，重听合格就用它（`engine` 记 `local(漂移)`），不合格保留原判（**绝不变空字幕**）。判据 `kana<0.20 且 latin>0.25` 在该批数据上拦下 8 段、其中 6 段正是漂移段，几乎零误杀。
+- **`/sil` 清理**：Fun 会把静音标记当字吐出来（`/sil`、`<sil>`、`[sil]`），`asr_gguf.tidy()` 统一抹掉并压空格；`silly`/`すし` 这类正常词不误伤。
+- 新增真值表 `tests/test_drift_guard.py`（7 组 18 项：英文漂移回退、正常日语不回退、两边都漂保留原文、韩文漂移、`lang=auto` 不判、中文链漂英文、tidy 边界）。
+- **文档大清理**：删掉过期的与写给你个人的（`docs/UI.md` 手写说明书、`docs/SETUP.md`、`docs/软件化路线.md`、`docs/选型-小显存方案.md`、`docs/前端AB-交接.md`、`docs/proto/` 三份向导原型、`CONTRIBUTING.md`）。选型资料合并成 `docs/识别引擎.md`（三档 GGUF + 两批实测 + 守卫 + 换机器命令 + 七条坑，选型只信这份）；`docs/PROTOCOL.md` 从 14 条路由补到全部 22 条 + SSE 八种事件 + 段 schema；`docs/待修清单.md` 只留未完成项。
+- **打包入口改名副实**：`scripts\打包.bat` 以前调的是「打源码 zip 发资料」的 `tools/pack.py`（还列着已删的文件），现在真跑 `tools/build_exe.py` + `tools/build_installer.py`；`tools/pack.py` 删除（发资料式分发已废）。
 ### 功能（子密钥网关）
 - **给别人用但不交出主密钥**：新增 `tools/relay.py` —— 主密钥留在自己机器上，对方拿 `sub-…` 子密钥打网关；校验、路径白名单、每日配额、记账、SSE 原样转发（首块不攒包）。端点支持 `http://host:port`（`vrdub/cfg.py` 的 `_host_of()` 与 `vrdub/net.py` 的 `_parse_host()`），控制台「密钥」卡可直接填网关地址。真值表 `tests/test_relay.py` 7 组 20 项全过；本机回环实测 chat 364 ms（直连 ~340 ms）、SSE 首块 292 ms。官方原生多 key（账号+地域最多 50 把、可设 IP/模型白名单）作为首选方案写进 `docs/子密钥网关.md`。
 

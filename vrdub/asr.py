@@ -366,6 +366,19 @@ class Transcriber:
             txt = util.clean_text(txt or "")
             ms = float(meta.get("ms") or 0.0)
             if txt:
+                # 语种漂移守卫：20261127 01:00–02:00 KTV 实录里，qwen17 在唱段 6/10 段
+                # 把日语写成英文（"I finally found you…"）或罗马字，字幕和翻译全废；
+                # 0.6B 会漂韩文、Fun 会漂英文+瞎补。判据直接用 lang_ok（ja 要假名≥15%），
+                # 命中就用 SenseVoice 重听一遍——它 0 复读 0 漂移，宁可字差也不要整句外语。
+                why = util.lang_why(txt, lang) if lang in ("ja", "zh", "en") else ""
+                if why:
+                    self.log("%s 输出语种不对（想要 %s，实际 %s）：%r → 退回 SenseVoice"
+                             % (e, lang, why, txt[:48]), "warn", "asr")
+                    if self.local.ready():
+                        lt = util.clean_text(self.local.transcribe(pcm16, lang) or "")
+                        if lt and util.lang_ok(lt, lang):
+                            return lt, "local(漂移)", (time.time() - t0) * 1000.0
+                    return txt, e, ms          # 本地也漂：保留原结果，别变成空字幕
                 return txt, e, ms
             # 这个档一个字都没出（解码自重复/模型缺失/显存不够）：退回 SenseVoice，
             # B 链宁可字差一点，也不要整段变成空字幕（那会被当成静音丢掉）。

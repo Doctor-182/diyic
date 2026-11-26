@@ -419,6 +419,28 @@ def lang_ok(s: str, dst: str) -> bool:
     return True
 
 
+def hangul_ratio(s: str) -> float:
+    """韩文谚文占内容字符的比例（日语链里出现韩文＝模型串台）。"""
+    t = bare(s)
+    if not t:
+        return 0.0
+    k = sum(1 for ch in t if 0xAC00 <= ord(ch) <= 0xD7A3 or 0x1100 <= ord(ch) <= 0x11FF)
+    return k / float(len(t))
+
+
+def lang_why(s: str, want: str) -> str:
+    """语种对不对；不对的时候给一句人话原因（对的返回空串）。"""
+    if lang_ok(s, want):
+        return ""
+    kana, cjk, latin = _ratios(s)
+    bits = ["假名 %.0f%%" % (kana * 100.0), "汉字 %.0f%%" % (cjk * 100.0),
+            "拉丁 %.0f%%" % (latin * 100.0)]
+    hg = hangul_ratio(s)
+    if hg > 0.05:
+        bits.append("韩文 %.0f%%" % (hg * 100.0))
+    return "，".join(bits)
+
+
 def has_kana(s: str) -> bool:
     return any(ch in _KANA for ch in s or "")
 

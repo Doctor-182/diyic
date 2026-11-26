@@ -125,7 +125,7 @@ DEFAULTS = {
     # GGUF 档（transcribe.cpp）：qwen17 / qwen06 / fun —— 这三个和 hybrid/local/cloud 平级，
     # 直接写在 asr_engine_a / asr_engine_b 里就能用。换档时旧模型会被显式卸载，
     # 同一时刻只驻留一个（三引擎并存实测出现 12–20 s 离群延迟）。
-    "asr_gguf_dir": "",          # 空 = <程序目录>modelsasr
+    "asr_gguf_dir": "",          # 空 = <程序目录>\models\asr
     "asr_gguf_backend": "cuda",  # cuda | vulkan | cpu（小模型上 vulkan 反而更快）
     "asr_gguf_hint": "auto",     # 是否把语种提示传给模型（auto 传 / off 只让它自己判）
     # 云端引擎的投机识别（只在 asr_engine_* = cloud 时用到）：

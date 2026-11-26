@@ -123,11 +123,13 @@
   function report(msg, extra) {
     try { console.error("[vrdub]", msg, extra || ""); } catch (e0) {}
     try {
+      /* 后端正在重启时这条 fetch 必然失败——必须自己吞掉，否则会再抛一个 unhandledrejection，
+         变成「上报失败 → 又上报」的雪崩 */
       fetch(api("/api/clientlog"), {
         method: "POST", cache: "no-store", keepalive: true,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ msg: msg, extra: (extra || "") + " · " + location.href })
-      });
+      }).catch(function () {});
     } catch (e) {}
   }
 

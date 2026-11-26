@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import gc
 import os
+import re
 import sys
 import threading
 import time
@@ -215,6 +216,18 @@ class Resident:
 RES = Resident()
 
 
+# Fun-ASR 会把 `/sil`、`<sil>` 这类标记当普通词吐出来（实测 012032 → "/sil"），
+# 它们既不是内容也不是标点，进字幕会被当成真话翻译，先清掉。
+_MARK = re.compile(r"(?i)[/<\[]?\bsil\b[/>\]]?")
+
+
+def tidy(text: str) -> str:
+    """去掉模型吐出的非语言标记，压掉多余空格。"""
+    s = _MARK.sub(" ", text or "")
+    s = re.sub(r"[ \t]{2,}", " ", s).strip()
+    return s
+
+
 def transcribe(eid, pcm16, lang="auto", cfg=None, hint="auto"):
     """跑一次识别，返回 (text, meta)。异常一律吞掉并把原因放 meta["err"]（不能让一段音频打断链路）。"""
     t0 = time.time()
@@ -237,7 +250,7 @@ def transcribe(eid, pcm16, lang="auto", cfg=None, hint="auto"):
             if lg:
                 kw["language"] = lg
             res = sess.run(x, **kw)
-            txt = util.clean_text((res.text or "").strip())
+            txt = tidy(util.clean_text((res.text or "").strip()))
             got = (getattr(res, "language", "") or "").strip()
             with RES._lock:
                 RES.n_runs += 1
