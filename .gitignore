@@ -23,10 +23,13 @@ _pylibs_cuda/
 _probe/
 
 # ---- 本地模型权重（>1 GB，单独分发）----
+# GGUF（qwen17 / qwen06 / fun）由 tools/fetch_asr_models.py 下，不进仓库
 models/**/*.onnx
 models/**/*.bin
+models/**/*.gguf
 models/**/.cache/
 models/anime-whisper-ct2-int8/
+models/_dl/
 
 # ---- 机器相关设置（设备序号/门限随机器不同）----
 data/settings.json

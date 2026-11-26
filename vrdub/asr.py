@@ -21,6 +21,7 @@ import numpy as np
 from . import util
 from .asr_whisper import WhisperASR
 from . import asr_engines
+from . import asr_gguf
 from . import paths as _paths
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -358,6 +359,23 @@ class Transcriber:
         """
         e = e or self.engine()
         t0 = time.time()
+        if e in asr_gguf.ENGINES:
+            # GGUF 档（qwen17 / qwen06 / fun）：一次只驻留一个模型，换档由 asr_gguf 负责卸载旧的。
+            txt, meta = asr_gguf.transcribe(e, pcm16, lang, self.cfg,
+                                            hint=self.cfg.get("asr_gguf_hint", "auto"))
+            txt = util.clean_text(txt or "")
+            ms = float(meta.get("ms") or 0.0)
+            if txt:
+                return txt, e, ms
+            # 这个档一个字都没出（解码自重复/模型缺失/显存不够）：退回 SenseVoice，
+            # B 链宁可字差一点，也不要整段变成空字幕（那会被当成静音丢掉）。
+            why = str(meta.get("err") or "空结果")[:80]
+            self.log("%s 没出字（%s），退回本地 SenseVoice" % (e, why), "warn", "asr")
+            if self.local.ready():
+                lt = util.clean_text(self.local.transcribe(pcm16, lang) or "")
+                if lt:
+                    return lt, "local(兜底)", (time.time() - t0) * 1000.0
+            return "", e, ms
         if e in ("local", "hybrid"):
             # 走哪条本地引擎由注册表按「语种 + 这台机器的条件」决定，不写死。
             eid, _why = self.pick_local(lang)
@@ -451,6 +469,21 @@ class Transcriber:
                 return txt, "whisper", ms
         return "", "off", 0.0
 
+    # ------------------------------------------------------------ GGUF 驻留管理
+    def gguf_release(self, why="") -> str:
+        """主动放掉 GGUF 显存（切回本地/云端引擎、或显存不够时用）。"""
+        return asr_gguf.RES.release(why)
+
+    def gguf_warm(self, eid) -> bool:
+        """预热某个 GGUF 档（换档时后台载入，别让第一句等 2–4 s）。"""
+        if eid not in asr_gguf.ENGINES:
+            return False
+        sess, err = asr_gguf.RES.acquire(eid, self.cfg)
+        if sess is None:
+            self.log("GGUF 预热失败 %s：%s" % (eid, err), "warn", "asr")
+            return False
+        return True
+
     def idle(self, sec=None) -> bool:
         """空闲回收显存（VRChat 要用）。"""
         if self.ja is None:
@@ -460,7 +493,9 @@ class Transcriber:
         return self.ja.idle_unload(sec)
 
     def stat(self) -> dict:
-        d = {"refine": str(self.cfg.get("asr_refine", "auto"))}
+        d = {"refine": str(self.cfg.get("asr_refine", "auto")),
+             "gguf": asr_gguf.RES.info(),
+             "gguf_models": asr_gguf.catalog(self.cfg)}
         if self.ja is not None:
             d.update(self.ja.stat())
         else:

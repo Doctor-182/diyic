@@ -139,6 +139,36 @@ B 链原来默认走云端。2026-11-19 用 5 条日语素材做同一素材对�
 云端引擎下**投机识别不占链线程**（后台线程 + 同时只跑一条 + 最小间隔 asr_spec_gap 1.5 s + 单次超时 asr_spec_timeout 6 s），所以收尾永远不会被投机挡住：实测云端对 5–11 s 的长段/唱歌会飘到 6–19 s，串行跑就会把后面每句都堵死。
 系统卡里那条「识别方式（两条链一起改）」是快捷方式，等价于同时改两个。
 
+### 本地 GGUF 三档：真·离线、自带标点（可选）
+
+云端慢、SenseVoice 不带标点也不判语种，所以除了「本地 /hybrid / 云端」，两条链的「识别」下拉里还多了三个**本地大模型档**。它们靠 [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp)（ggml，CUDA/Vulkan）跑 GGUF 量化模型，控制台里选一下、下一段就换过去：
+
+| 档（`asr_engine_*`） | 模型 | 体积 | 显存 | 实测单段 | 语种判定 | 标点 |
+|---|---|---|---|---|---|---|
+| `qwen17` | Qwen3-ASR-1.7B Q5_K_M | 1447 MB | 1441 MiB | 269–484 ms | 有 | 有 |
+| `qwen06` | Qwen3-ASR-0.6B Q8_0 | 811 MB | 805 MiB | 354 ms（p50） | 有 | 有 |
+| `fun` | Fun-ASR-Nano-2512 Q8_0 | 850 MB | 844 MiB | 386 ms（p50） | 无（要自己给语种） | **无** |
+
+同一个 VRChat 现场（真人日语、16 段纯对话，对云端参考算 CER）：**1.7B 与 SenseVoice 的 CER 一样是 29.32%，但 1.7B 整句全对 3 段、SenseVoice 0 段**（SV 爱在句尾瞎补，`好きなんですけど` → `…けどしい`）；0.6B 36.73% / 全对 2；Fun 37.04% / 全对 2，且有把日语听成中文的毛病（`我不能不问`）。含唱歌的 22 段里 Qwen 系会整段吐英文歌词——**B 链遇到 VRChat 里放日文歌时，Qwen 的语种判定反而是优点，Fun 是缺点**。真机切到 `qwen17` 的现场字幕：`ありえない。ねえ、これねプヨプヨするね。` / `加害者えなんかさ結構なんかあのあのチョイスがさ攻撃的。`（159.8–356.3 ms，自带标点、无空段）。
+
+四条硬规矩：
+
+1. **一次只驻留一个**：换档时先卸载旧模型再载新的（`asr_gguf.Resident` 里串行、带锁），日志会写「GGUF 切换：卸载 X → 载入 Y」。两个 GGUF 档同时驻留会直接吃掉 2.2–3 GB 显存，8 GB 卡上跟 VRChat 抢不起。
+2. **两条链选了不同档**只驻留 B 链那个（B 是说话听得最多的通道），并 warn 一句。
+3. **聊天框继承 B 链**：B 链用 GGUF 档时，聊天框文本就是这个模型的输出，不再额外花云端钱重听一遍（`chains._chatbox_src`）。
+4. **GGUF 档不精修**：它自带标点与语种判定，anime-whisper（0.968）只会把好的擦掉。
+
+模型与运行库不进 git、也不在默认安装包里（3 GB + 1 GB）。换机器/给朋友装：
+
+```bat
+python tools\fetch_asr_models.py --check      :: 看缺什么
+python tools\fetch_asr_models.py --all        :: 下模型（走 HF，可加 --proxy http://127.0.0.1:2080）
+scripts\打包.bat                              :: 默认安装包不带 GGUF
+python tools\build_exe.py --with-gguf         :: 要带就显式加（安装包会涨到 1.5 GB 以上）
+```
+
+CUDA 版的 `ggml-cuda.dll` 用裸名 `LoadLibraryA("cublas64_12.dll")` 找库，**只认 PATH、不认自己所在目录**，所以本机没装 CUDA Toolkit 时必须把 `cublas64_12.dll / cublasLt64_12.dll / cudart64_12.dll` 放进 `transcribe_cpp_native_cu12\_native` 并由 `asr_gguf._env_setup()` 把该目录前置进 PATH（`fetch_asr_models.py --runtime` 已经这么装）。缺了会报 `BackendError: backend error (status 8)`。
+
 ### 精修（refine）：定稿后后台再听一遍
 
 快路（本地 SenseVoice）先把字幕顶上去，**定稿之后**后台再听一遍同一段音频，改了就把字幕刷掉——B 链连中文译文一起刷。开关在控制台 B 卡第二条「识别」下拉（`asr_refine`）：
@@ -279,6 +309,7 @@ vrdub/
   audio.py           WASAPI 采集/播放、混音环、duck、设备热切换
   vad.py             端点检测：投机 / 收尾 / 强切 三个出口 + 能量闸
   asr.py             本地 SenseVoice + 云端 qwen-audio-3.0-asr（混合，谁快用谁）
+  asr_gguf.py        GGUF 三档（Qwen3-ASR 1.7B/0.6B、Fun-ASR-Nano）：换档独占、CUDA/Vulkan
   mt.py              翻译（SSE 流式，子句切分，语速映射）
   persona.py         人设卡 + 保真硬约束 + 上下文拼装
   voices.py          音色克隆（样本转码 / 上传 / 训练轮询 / 本地音色表）
@@ -309,6 +340,8 @@ out/                 自检报告、评测报告、截图、录音、日志
 6. **C 链（屏幕 OCR）还没做好**：链路是通的（框选→截图→识别→翻译→浮窗原文），但只在小窗口截图上验证过；跟着画面变化连续识别、原文浮回原位、多语种切换、游戏内 HUD 遮挡都还没调稳。所以默认 **`ocr_on=false`**。现状与缺口记在 `docs/待修清单.md` 第 4 条。
 7. **音色克隆还不完善**：录音→转码→上传→训练轮询→切音色这条链能跑通，但样本处理只做了「下混 + 24 kHz 重采样 + 峰值归一（上限 +30 dB）」，没有降噪、没有静音裁边、没有多段拼接；克隆音色在长句/情绪句上的稳定性也没做过主观评测。另外**套餐 key 不支持音色复刻模型**（HTTP 404 `Model not exist.`），会自动转按量 key，没配按量 key 就会失败。
 8. **没有托盘、没有自更新**：退出就是关掉后端；升级要重新下安装包（配置和日志在用户目录，不会丢）。
+9. **GGUF 三档默认不在安装包里**：运行库（transcribe_cpp + CUDA 版 DLL）1.0 GB、三个模型 3.1 GB，全塞进去安装包会从 264 MB 涨到 1.5 GB 以上，所以默认只装 SenseVoice（252 MB）。要用 Qwen3-ASR / Fun-ASR：跑一次 `python tools\fetch_asr_models.py --all`，或者自建时用 `tools\build_exe.py --with-gguf`。另外 **CUDA 版本吃显存档位**：1.7B 常驻 1441 MiB，VRChat 自己在 8 GB 卡上已经占 4.4–4.6 GB，切之前先看一眼控制台「系统」卡里的显存。
+10. **一次只能驻留一个 GGUF 档**（这是设计，不是缺陷）：切档要重新载入，1.7B 约 2.8 s，期间那一段识别走本地 SenseVoice 兜底。
 
 ---
 

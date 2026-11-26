@@ -50,6 +50,13 @@ MODEL_FILES = [
     "models/ocr/config_ja.yaml",
 ]
 
+# GGUF 档（tools/fetch_asr_models.py 下到 models/asr）——只在 --with-gguf 时进包
+GGUF_FILES = [
+    "Qwen3-ASR-1.7B-Q5_K_M.gguf",
+    "Qwen3-ASR-0.6B-Q8_0.gguf",
+    "Fun-ASR-Nano-2512-Q8_0.gguf",
+]
+
 HIDDEN = [
     # 四个 Qt 子程序是按名字（--child NAME）动态导入的，静态分析看不到，必须显式点名，
     # 否则装完之后 hud/danmaku/overlay 会 ModuleNotFoundError，界面上只看到"浮窗起不来"。
@@ -153,6 +160,42 @@ def copy_models() -> None:
             shutil.copy2(src, os.path.join(APP_DIR, rel))
 
 
+def copy_asr_runtime() -> None:
+    r"""可选：把 GGUF 识别档（transcribe_cpp + 3 个 gguf 模型）也装进产物。
+
+    默认不装 —— 加一起 4 GB，安装包会从 264 MB 涨到 1.5 GB 以上。
+    需要「朋友那台机器不联网也能用 Qwen3-ASR」时才加 --with-gguf。
+
+    运行库必须放进 _internal（冻结后它就是 sys.path 的一员，import 找得到）：
+    transcribe_cpp 用 ctypes 加载 _native 里的 dll，且 ggml-cuda.dll 只认 PATH，
+    所以 asr_gguf._env_setup() 会把该目录前置进 PATH。
+    """
+    src_pkg = os.path.join(ROOT, ".pylibs", "transcribe_cpp")
+    src_nat = os.path.join(ROOT, ".pylibs", "transcribe_cpp_native_cu12")
+    if not (os.path.isdir(src_pkg) and os.path.isdir(src_nat)):
+        raise SystemExit("缺 transcribe_cpp 运行库（先跑 tools/fetch_asr_models.py --runtime）")
+    internal = os.path.join(APP_DIR, "_internal")
+    os.makedirs(internal, exist_ok=True)
+    n = 0
+    for src in (src_pkg, src_nat):
+        dst = os.path.join(internal, os.path.basename(src))
+        if os.path.isdir(dst):
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst)
+        n += dir_size(dst)
+    log("GGUF 运行库就位 %.1f MB" % n)
+    m = 0
+    for fn in GGUF_FILES:
+        src = os.path.join(ROOT, "models", "asr", fn)
+        if not os.path.isfile(src):
+            raise SystemExit("缺模型 %s（先跑 tools/fetch_asr_models.py --download）" % fn)
+        dst = os.path.join(APP_DIR, "models", "asr", fn)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(src, dst)
+        m += os.path.getsize(dst)
+    log("GGUF 模型就位 %d 个 / %.1f MB" % (len(GGUF_FILES), m / 1048576.0))
+
+
 def dir_size(path: str) -> float:
     n = 0
     for base, _dirs, files in os.walk(path):
@@ -214,10 +257,14 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--skip-build", action="store_true", help="跳过 PyInstaller，只补模型+冒烟")
     ap.add_argument("--no-smoke", action="store_true")
+    ap.add_argument("--with-gguf", action="store_true",
+                    help="把 GGUF 识别档（运行库 1 GB + 模型 3 GB）也装进产物")
     a = ap.parse_args(argv)
     if not a.skip_build:
         run_pyinstaller()
     copy_models()
+    if a.with_gguf:
+        copy_asr_runtime()
     log("产物体积 %.1f MB（%s）" % (dir_size(APP_DIR), APP_DIR))
     if not a.no_smoke:
         if not smoke():

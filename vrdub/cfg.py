@@ -122,6 +122,12 @@ DEFAULTS = {
     # 实测 5 条日语素材与云端文本相似度 1.00，而云端同批 0.34–13.2 s（抖动极大）。
     # 云端仍会在 _refine_async 里后台校正字幕，所以准确率不降、延迟稳。
     "asr_engine_b": "hybrid",
+    # GGUF 档（transcribe.cpp）：qwen17 / qwen06 / fun —— 这三个和 hybrid/local/cloud 平级，
+    # 直接写在 asr_engine_a / asr_engine_b 里就能用。换档时旧模型会被显式卸载，
+    # 同一时刻只驻留一个（三引擎并存实测出现 12–20 s 离群延迟）。
+    "asr_gguf_dir": "",          # 空 = <程序目录>modelsasr
+    "asr_gguf_backend": "cuda",  # cuda | vulkan | cpu（小模型上 vulkan 反而更快）
+    "asr_gguf_hint": "auto",     # 是否把语种提示传给模型（auto 传 / off 只让它自己判）
     # 云端引擎的投机识别（只在 asr_engine_* = cloud 时用到）：
     # 最小间隔、单次超时。云端长段识别会飘到十几秒，靠这两个值把并发和延迟关进笼子。
     "asr_spec_gap": 1.5,
@@ -454,8 +460,13 @@ def clamp_cfg(d: dict) -> dict:
     d["chatbox_budget"] = max(0.5, min(20.0, float(d.get("chatbox_budget", 5.0))))
     d["a_cloud_wait"] = max(0.0, min(5.0, float(d.get("a_cloud_wait", 1.0))))
     for k in ("asr_engine", "asr_engine_a", "asr_engine_b"):
-        if d.get(k) not in ("hybrid", "local", "cloud"):
+        if d.get(k) not in ("hybrid", "local", "cloud", "qwen17", "qwen06", "fun"):
             d[k] = DEFAULTS[k]
+    d["asr_gguf_dir"] = str(d.get("asr_gguf_dir") or "").strip()[:260]
+    if d.get("asr_gguf_backend") not in ("cuda", "vulkan", "cpu"):
+        d["asr_gguf_backend"] = "cuda"
+    if d.get("asr_gguf_hint") not in ("auto", "off"):
+        d["asr_gguf_hint"] = "auto"
     if d.get("asr_refine") not in ("auto", "whisper", "cloud", "off"):
         d["asr_refine"] = "auto"
     if d.get("asr_local_engine") and d["asr_local_engine"] not in ("sensevoice", "whisper-anime", ""):

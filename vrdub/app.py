@@ -35,6 +35,7 @@ from . import version
 from . import paths as pathmod
 from . import child as childmod
 from . import asr as asr_mod
+from . import asr_gguf
 from .asr import Transcriber
 from .vad import Segmenter
 
@@ -1059,7 +1060,11 @@ class App:
                     # 光是打开控制台就吃掉 1.1 GB 显存。只报「已经载着的」状态。
                     "refine": str(c.get("asr_refine", "auto")),
                     "ja": (self.asr.ja.stat() if self.asr.ja is not None
-                           else {"device": "-", "note": "未加载"})},
+                           else {"device": "-", "note": "未加载"}),
+                    # GGUF 档（qwen17 / qwen06 / fun）：同一时刻只驻留一个，
+                    # 这里报的是「现在占着显存的是谁、吃了多少」，换档时控制台能直接看见。
+                    "gguf": asr_gguf.RES.info(),
+                    "gguf_models": asr_gguf.catalog(c)},
             "loop": {"src": str(c.get("loop_src", "process")),
                      "proc": str(c.get("loop_proc", "VRChat.exe")),
                      "pid": int(getattr(self.proc_loop, "pid", 0) or 0),
@@ -1227,6 +1232,29 @@ class App:
                     pass
             util.log(f"翻译已停：撤掉 {n} 条未播译文（识别继续，只出原文）", "info", "cfg")
 
+    def _apply_gguf(self, keys):
+        r"""GGUF 档的进与出：同一时刻只驻留一个模型。
+
+        真机踩过：三引擎同时驻留时出现 12–20 s 的离群延迟（显存与上下文互相挤），
+        所以这里的原则是「先卸后载」，而且只留两条链里真正在用的那一个——
+        B 链（对方说话）优先，因为它的段更密。
+        """
+        ea = str(self.cfg.get("asr_engine_a") or "")
+        eb = str(self.cfg.get("asr_engine_b") or "")
+        want = [x for x in (eb, ea) if x in asr_gguf.ENGINES]
+        if not want:
+            had = self.asr.gguf_release("两条链都不再用 GGUF 档")
+            if had:
+                util.log("GGUF 显存已放掉（两条链都不再用 GGUF 档）", "info", "cfg")
+            return
+        keep = want[0]
+        if len(set(want)) > 1:
+            util.log("两条链选了不同的 GGUF 档（A=%s B=%s）：只驻留 %s，另一条链用到时会换档"
+                     "（换档要 2–4 s 载入，建议两边选同一个）" % (ea, eb, keep), "warn", "cfg")
+        t = threading.Thread(target=self.asr.gguf_warm, args=(keep,),
+                             name="gguf-warm", daemon=True)
+        t.start()
+
     def apply(self, changed):
         keys = set(changed)
         if keys & {"out_dev", "mic_dev", "loop_dev", "mon_dev", "mon_on",
@@ -1243,6 +1271,9 @@ class App:
                      "info", "cfg")
         if keys & {"out_on", "in_on", "asr_on", "mt_on", "mode", "mic_on"}:
             self._apply_chain_gates(keys)
+        if keys & {"asr_engine", "asr_engine_a", "asr_engine_b",
+                   "asr_gguf_dir", "asr_gguf_backend", "asr_gguf_hint"}:
+            self._apply_gguf(keys)
         if keys & {"card", "persona_custom"}:
             if "persona_custom" in keys:
                 pc = personamod.set_custom(str(self.cfg.get("persona_custom") or ""))

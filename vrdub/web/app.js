@@ -1161,20 +1161,32 @@
   }
 
   /* 识别引擎徽标：A/B 各一格（本地/云端），title 里带精修模型现状 */
-  var ASR_TXT = { hybrid: "本地+云", local: "本地", cloud: "云端" };
+  var ASR_TXT = { hybrid: "本地+云", local: "本地", cloud: "云端",
+    qwen17: "Qwen1.7B", qwen06: "Qwen0.6B", fun: "FunASR" };
+  var GGUF_IDS = { qwen17: 1, qwen06: 1, fun: 1 };
+  /* GGUF 档的驻留说明：同一时刻只有一个模型在显存里，徽标上直接写清「是不是它、占多少」
+     ——换档要 2–4 s 载入，看见「待载入」就知道下一句会慢一点。 */
+  function ggufNote(a, eid) {
+    if (!GGUF_IDS[eid]) return "";
+    var g = a.gguf || {};
+    if (g.err) return " · 载入失败：" + g.err;
+    if (!g.key) return " · 待载入";
+    if (g.key !== eid) return " · 现驻留 " + (ASR_TXT[g.key] || g.key);
+    return " · " + Math.round(g.vram_mb || 0) + " MiB";
+  }
   function renderAsr() {
     var a = st.asr || {};
     if (els.engA) {
-      setTx(els.engA, ASR_TXT[a.a] || "–");
-      els.engA.title = "A 链识别：" + (ASR_TXT[a.a] || "–");
+      setTx(els.engA, (ASR_TXT[a.a] || "–") + ggufNote(a, a.a));
+      els.engA.title = "A 链识别：" + (ASR_TXT[a.a] || "–") + ggufNote(a, a.a);
     }
     if (els.engB) {
-      setTx(els.engB, ASR_TXT[a.b] || "–");
+      setTx(els.engB, (ASR_TXT[a.b] || "–") + ggufNote(a, a.b));
       var ja = a.ja || {};
       var rf = a.refine === "off" ? "关闭"
         : (ja.device && ja.device !== "-" ? ("本地 " + ja.device) : (a.refine === "cloud" ? "云端" : "云端（本地待命）"));
-      els.engB.title = "B 链识别：" + (ASR_TXT[a.b] || "–") + " · 精修：" + rf +
-        (ja.note ? " · " + ja.note : "");
+      els.engB.title = "B 链识别：" + (ASR_TXT[a.b] || "–") + ggufNote(a, a.b) +
+        " · 精修：" + rf + (ja.note ? " · " + ja.note : "");
       els.engB.classList.toggle("ok", !!(ja.device && ja.device !== "-"));
     }
   }
@@ -1182,6 +1194,22 @@
   function renderSys() {
     setTx(els.sysPid, st.pid ? String(st.pid) : "–");
     setTx(els.sysVer, st.ver || "–");
+    /* GGUF 档：显存里现在是谁、吃了多少；没驻留就报「装了哪几个」。
+       换档有 2–4 s 载入，用户看见「未驻留」就知道下一句会慢一点。 */
+    if (els.sysGguf) {
+      var aa = st.asr || {}, g = aa.gguf || {};
+      var cat = aa.gguf_models || [];
+      var have = cat.filter(function (m) { return m.present; })
+        .map(function (m) { return ASR_TXT[m.id] || m.id; });
+      var txt = g.key
+        ? ((ASR_TXT[g.key] || g.key) + " 驻留 " + Math.round(g.vram_mb || 0) + " MiB")
+        : ("未驻留 · 已装 " + (have.length ? have.join(" / ") : "无"));
+      setTx(els.sysGguf, txt);
+      els.sysGguf.title = cat.map(function (m) {
+        return m.name + (m.present ? " · " + m.mb + " MB" : " · 未下载") +
+          " · 显存约 " + m.vram_mb + " MiB · " + m.backend;
+      }).join("\n") || "没有可选档";
+    }
   }
   function renderHudInfo() {
     var h = st.hud || {};
@@ -1531,6 +1559,7 @@
     els.sysPid = $("#sysPid"); els.sysVer = $("#sysVer"); els.sysUp = $("#sysUp"); els.sysHud = $("#sysHud");
     els.sysDanmaku = $("#sysDanmaku"); els.danmHint = $("#danmHint");
     els.sysMic = $("#sysMic");
+    els.sysGguf = $("#sysGguf");
 
     buildParams($("#params"), MAIN_PARAMS);
     buildParams($("#latparams"), LAT_PARAMS);

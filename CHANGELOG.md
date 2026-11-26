@@ -19,6 +19,14 @@
 - **人设（口吻）**：三张内置卡 + 最多 1200 字自定义口吻，热生效；硬约束（全译 / 不增 / 不减 / 不省略 / 人称照原文 / 只出译文 / 禁标签）永远追加在末尾，且只作用于 A 链。
 - 新增真值表 `tests/test_voices.py`（12 组，含端点记忆）、`tests/test_persona.py`。
 
+### 功能（GGUF 本地大模型档）
+- 两条链的「识别」下拉多了三个**离线档**：`qwen17`（Qwen3-ASR-1.7B Q5_K_M，1447 MB / 显存 1441 MiB）、`qwen06`（0.6B Q8_0，811 MB / 805 MiB）、`fun`（Fun-ASR-Nano-2512 Q8_0，850 MB / 844 MiB）。走 [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp) 的 CUDA/Vulkan 后端，**自带标点、Qwen 系还能判语种**——SenseVoice 这两样都没有。
+- 真机对照（16 段真人日语纯对话，对云端参考）：1.7B 与 SenseVoice 的 CER 同为 29.32%，但整句全对 **3 : 0**；0.6B 36.73% / 全对 2；Fun 37.04% / 全对 2 且会把日语听成中文。VRChat 里切 `qwen17` 后现场字幕 159.8–356.3 ms、无空段（`ありえない。ねえ、これねプヨプヨするね。`）。
+- **换档独占**：`asr_gguf.Resident` 带锁串行，换档先卸载旧模型再载新的（日志「GGUF 切换：卸载 X → 载入 Y」）；两条链选了不同档只驻留 B 链那个并 warn。**聊天框继承 B 链**：B 链用 GGUF 档时聊天框直接用它自己的输出，不再花云端钱重听。GGUF 档自动跳过 refine（它自带标点，anime-whisper 0.968 只会擦掉好的）。
+- 运维：`tools/fetch_asr_models.py --check/--download/--runtime/--all/--proxy`（HF + GitHub release，纯标准库）；`tools/build_exe.py --with-gguf` 才把运行库与模型装进安装包（默认不带，否则包从 264 MB 涨到 1.5 GB 以上）。
+- 踩过的坑写进 README §2：CUDA 版 `ggml-cuda.dll` 用裸名 `LoadLibraryA` 找 cublas，**只认 PATH**；直接摊开的 wheel 没有 dist-info 就没有 entry point，必须显式设 `TRANSCRIBE_LIBRARY`。
+- 新增真值表 `tests/test_gguf_engine.py`（8 组：换档卸载、同档不重载、缺文件、解码自重复、没出字回退 local(兜底)、B 链聊天框不重听、clamp 白名单）。
+
 ### 功能（子密钥网关）
 - **给别人用但不交出主密钥**：新增 `tools/relay.py` —— 主密钥留在自己机器上，对方拿 `sub-…` 子密钥打网关；校验、路径白名单、每日配额、记账、SSE 原样转发（首块不攒包）。端点支持 `http://host:port`（`vrdub/cfg.py` 的 `_host_of()` 与 `vrdub/net.py` 的 `_parse_host()`），控制台「密钥」卡可直接填网关地址。真值表 `tests/test_relay.py` 7 组 20 项全过；本机回环实测 chat 364 ms（直连 ~340 ms）、SSE 首块 292 ms。官方原生多 key（账号+地域最多 50 把、可设 IP/模型白名单）作为首选方案写进 `docs/子密钥网关.md`。
 

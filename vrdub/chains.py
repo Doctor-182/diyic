@@ -25,6 +25,7 @@ import time
 import numpy as np
 
 from . import util
+from . import asr_gguf
 
 _RE_END = "。！？!?…；;，,、：:"
 # 没有标点时也不能一直憋着：语气词/句末助词后面是天然的气口
@@ -365,7 +366,7 @@ class StreamChain:
         没设就回落全局 asr_engine。引擎是即时读的，控制台改完下一段就生效，不用重启。"""
         key = "asr_engine_a" if self.src_key == "mic" else "asr_engine_b"
         v = str(self.cfg.get(key) or "")
-        if v in ("hybrid", "local", "cloud"):
+        if v in ("hybrid", "local", "cloud", "qwen17", "qwen06", "fun"):
             return v
         return str(self.cfg.get("asr_engine", "hybrid"))
 
@@ -862,14 +863,43 @@ class StreamChain:
             finally:
                 self._cb_q.task_done()
 
+    def _chatbox_src(self, audio, lang, left, eng_b):
+        r"""聊天框要用的原文：继承 B 链的识别引擎（用户口径：聊天框就直接继承 B 链）。
+
+        B 链选了 GGUF 档（qwen17 / qwen06 / fun）→ 用那个模型重听这一句。
+        它就是用户认定最好的那一档，再花钱问云端只会更慢更差。
+        B 链是 hybrid / cloud → 走云端重听（本地那遍本来就是应急的）。
+        其它（纯本地）→ 不重听，直接用这一句已有的译文。
+
+        返回 (文本, 来源)；拿不到文本时文本为空。
+        """
+        eid = str(eng_b or "")
+        if eid in asr_gguf.ENGINES:
+            try:
+                txt, _e, _ms = self.asr.transcribe_fast(audio, lang, e=eid)
+            except Exception as exc:                  # noqa: BLE001
+                self.log(f"{self.name} chatbox 用 {eid} 重听失败：{exc!r}", "warn", self.name)
+                return "", eid
+            return _norm(txt or ""), eid
+        if eid in ("hybrid", "cloud"):
+            try:
+                return _norm(self._cloud_now(audio, lang, left) or ""), "cloud"
+            except Exception as exc:                  # noqa: BLE001
+                self.log(f"{self.name} chatbox 云端重听失败：{exc!r}", "warn", self.name)
+                return "", "cloud"
+        return "", eid
+
     def _chatbox_one(self, item):
         bseg, st = item["bseg"], item["st"]
         if st.get("cb_done"):
             st["cb_pending"] = False
             return
         budget = max(0.5, float(self.cfg.get("chatbox_budget", 5.0)))
+        # 聊天框的原文继承 B 链的引擎（含 GGUF 三档）：用户选 B 链用的就是他认为最好的那个，
+        # 聊天框没理由另开一套。B 链是 hybrid/cloud 时才花云端那笔钱。
+        eng_b = str(self.cfg.get("asr_engine_b") or "hybrid")
         want_cloud = bool(self.cfg.get("chatbox_cloud", True)) \
-            and self.engine() in ("hybrid", "cloud")
+            and (eng_b in ("hybrid", "cloud") or eng_b in asr_gguf.ENGINES)
         src_local = item["src"]
         dst_lang = st.get("dst_lang")
         out = ""
@@ -880,7 +910,7 @@ class StreamChain:
                 # 预算从「这句定稿的时刻」算起，排队等待不算在里面
                 left = budget - (t0 - item["t"])
                 if left > 0.2:
-                    ct = self._cloud_now(item["audio"], item["lang"], left)
+                    ct, how = self._chatbox_src(item["audio"], item["lang"], left, eng_b)
                     left = budget - (time.time() - item["t"])
                     if ct and left > 0.2 and not (
                             kana_ratio(ct) > 0.2 and kana_ratio(src_local) < 0.05):
@@ -890,7 +920,7 @@ class StreamChain:
                                                   timeout=left, custom=self._persona())
                             cd = (r.get("text") or "").strip()
                             if cd and not lang_leak(cd, dst_lang):
-                                out, why = cd, "云端"
+                                out, why = cd, how
         except Exception as exc:                      # noqa: BLE001
             self.log(f"{self.name} chatbox 云端文本失败：{exc!r}", "warn", self.name)
         if not out:
@@ -911,7 +941,10 @@ class StreamChain:
         """
         if not self.cfg.get("refine", True):
             return
-        if self.engine() == "cloud":        # 主路径本来就是云端，收尾不用再来一遍
+        # 主路径本来就是云端 / GGUF 档，收尾不用再来一遍：
+        # GGUF 档（尤其 qwen17）自带标点与语种判定，是本机最强的那一档，
+        # 再让 anime-whisper（真机 0.968）去改它等于把好的擦掉。
+        if self.engine() == "cloud" or self.engine() in asr_gguf.ENGINES:
             return
         if self.asr.refiner() == "off":
             return
