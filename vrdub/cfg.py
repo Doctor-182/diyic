@@ -95,12 +95,17 @@ DEFAULTS = {
     # 分段
     "mic_db": -32.0,
     "mic_gate_db": 6.0,         # 段内 95 分位要比门限高这么多 dB 才送识别（挡静音幻觉）
+    "active_ms": 120,           # 段内「高过门限」的帧至少这么多毫秒才算真说话
+    "speech_ratio": 0.12,       # 有效发声还要占整段这么多比例（挡咔哒/敲键盘）
     "loop_db": -24.0,
     "auto_noise": True,         # 开麦/开回环时自动测本底噪声定门限
     "noise_margin": 12.0,       # 门限 = 本底 + 这么多 dB
     "min_speech": 0.35,
     "max_speech": 12.0,
     "end_silence": 0.50,
+    "valley_cut": False,        # 到了 max_speech 不按时间硬切，回看最近 valley_win 秒找能量谷切
+    "valley_win": 2.5,          # 往回看多久找谷（s）
+    "valley_gap": 6.0,          # 谷要比该窗口电平中位数低这么多 dB 才算「谷」
     "pre_roll": 0.25,
     "spec_silence": 0.18,       # 投机识别触发的静音
     "live": True,               # 边说边提交子句（同传核心，关掉=等整句）
@@ -423,6 +428,10 @@ def clamp_cfg(d: dict) -> dict:
     d["min_speech"] = max(0.15, min(2.0, float(d.get("min_speech", 0.35))))
     d["max_speech"] = max(4.0, min(30.0, float(d.get("max_speech", 12.0))))
     d["max_speech_b"] = max(2.5, min(30.0, float(d.get("max_speech_b", 6.0))))
+    d["active_ms"] = int(max(40, min(1500, int(d.get("active_ms", 120) or 120))))
+    d["speech_ratio"] = max(0.02, min(0.9, float(d.get("speech_ratio", 0.12))))
+    d["valley_win"] = max(0.8, min(8.0, float(d.get("valley_win", 2.5))))
+    d["valley_gap"] = max(2.0, min(20.0, float(d.get("valley_gap", 6.0))))
     d["pre_roll"] = max(0.0, min(1.0, float(d.get("pre_roll", 0.25))))
     d["spec_silence"] = max(0.12, min(0.6, float(d.get("spec_silence", 0.18))))
     d["duck"] = max(0.0, min(1.0, float(d.get("duck", 0.0))))

@@ -220,7 +220,11 @@
     { k: "refine_timeout", label: "精修超时",                min: 2,    max: 20,  step: 0.5,  unit: "s", dec: 1 },
     { k: "commit_chars",   label: "凑够几字就开口",          min: 1,    max: 40,  step: 1,    unit: "字", dec: 0 },
     { k: "partial_every",  label: "半截字幕刷新间隔（0=关）", min: 0,    max: 2,   step: 0.05, unit: "s", dec: 2 },
-    { k: "speak_q_max",    label: "播放队列上限",            min: 1,    max: 8,   step: 1,    unit: "句", dec: 0 }
+    { k: "speak_q_max",    label: "播放队列上限",            min: 1,    max: 8,   step: 1,    unit: "句", dec: 0 },
+    { k: "valley_win",     label: "谷切回看窗口",            min: 0.8,  max: 8,   step: 0.1,  unit: "s", dec: 1 },
+    { k: "valley_gap",     label: "谷要低多少 dB 才算谷",     min: 2,    max: 20,  step: 0.5,  unit: "dB", dec: 1 },
+    { k: "active_ms",      label: "有效发声至少",            min: 40,   max: 1500, step: 10,  unit: "ms", dec: 0 },
+    { k: "speech_ratio",   label: "占空比至少（挡咔哒）",     min: 0.02, max: 0.9, step: 0.01, unit: "", dec: 2 }
   ];
   var HUD_PARAMS = [
     { k: "hud_alpha", label: "不透明度", min: 10, max: 100, step: 1, unit: "%", dec: 0 },
