@@ -228,6 +228,24 @@ def tidy(text: str) -> str:
     return s
 
 
+def _vocab_of(cfg):
+    """专名表：只给 qwen 系（fun 不认 vocabulary）。cfg 可能是 Cfg 对象也可能是 dict。"""
+    try:
+        raw = cfg.get("asr_gguf_vocab") if hasattr(cfg, "get") else (cfg or {}).get("asr_gguf_vocab")
+    except Exception:                              # noqa: BLE001
+        return []
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        return []
+    out = []
+    for it in raw:
+        w = str(it or "").strip()
+        if w and len(w) <= 24:
+            out.append(w)
+    return out[:8]
+
+
 def transcribe(eid, pcm16, lang="auto", cfg=None, hint="auto"):
     """跑一次识别，返回 (text, meta)。异常一律吞掉并把原因放 meta["err"]（不能让一段音频打断链路）。"""
     t0 = time.time()
@@ -243,22 +261,27 @@ def transcribe(eid, pcm16, lang="auto", cfg=None, hint="auto"):
     if want_hint and code:
         tries.append(code)
     tries.append(None)          # 兜底：语种提示不被这个模型接受时，退回自动判定
+    vocab = _vocab_of(cfg) if eid in ("qwen17", "qwen06") else []
     last = ""
     for lg in tries:
-        try:
-            kw = {"task": "transcribe", "timestamps": "none"}
-            if lg:
-                kw["language"] = lg
-            res = sess.run(x, **kw)
-            txt = tidy(util.clean_text((res.text or "").strip()))
-            got = (getattr(res, "language", "") or "").strip()
-            with RES._lock:
-                RES.n_runs += 1
-            return txt, {"engine": eid, "ms": round((time.time() - t0) * 1000.0, 1),
-                         "err": "", "lang": got, "hint": lg or "auto"}
-        except Exception as e:                    # noqa: BLE001
-            last = type(e).__name__
-            continue
+        for use_vocab in ((True, False) if vocab else (False,)):
+            try:
+                kw = {"task": "transcribe", "timestamps": "none"}
+                if lg:
+                    kw["language"] = lg
+                if use_vocab:
+                    kw["vocabulary"] = vocab
+                res = sess.run(x, **kw)
+                txt = tidy(util.clean_text((res.text or "").strip()))
+                got = (getattr(res, "language", "") or "").strip()
+                with RES._lock:
+                    RES.n_runs += 1
+                return txt, {"engine": eid, "ms": round((time.time() - t0) * 1000.0, 1),
+                             "err": "", "lang": got, "hint": lg or "auto",
+                             "vocab": len(vocab) if use_vocab else 0}
+            except Exception as e:                # noqa: BLE001
+                last = type(e).__name__
+                continue
     # 解码自重复（OutputRepetition）等：transcribe.cpp 主动停下，一段音频不值得重试
     return "", {"engine": eid, "ms": round((time.time() - t0) * 1000.0, 1),
                 "err": last or "失败", "lang": ""}

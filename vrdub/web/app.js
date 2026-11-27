@@ -491,6 +491,14 @@
     setTx(els.personaHint, String(els.personaText.value.length) + " / 1200");
   }
 
+  /* 专名表：只给 GGUF 档喂 vocabulary，压住「ロックマン→動画」这类音近乱写 */
+  function renderVocab(list) {
+    if (!els.ggufVocab) return;
+    if (document.activeElement === els.ggufVocab || st.vocabDirty) return;
+    var arr = (list && list.length !== undefined) ? list : (st.cfg.asr_gguf_vocab || []);
+    els.ggufVocab.value = (arr || []).join(", ");
+  }
+
   /* 克隆音色：录音 → 试听 → 上传训练 → 自动切过去（全程不离开这个页面） */
   var cloneT = null;
   function setClone(txt, state) {
@@ -1135,6 +1143,7 @@
     if (s.devices) st.devices = s.devices;
     if (s.voices) st.voices = s.voices;
     if (s.persona) st.persona = s.persona;
+    st.vocabFromState = (s.cfg && s.cfg.asr_gguf_vocab) || [];
     if (s.voice_job) st.voiceJob = s.voice_job;
     if (s.metrics) st.metrics = s.metrics;
     if (s.hud) st.hud = s.hud;
@@ -1160,6 +1169,7 @@
     last.slice().sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); })
       .forEach(function (seg) { onSeg(seg); });
     renderChains();
+    renderVocab(st.vocabFromState);
   }
 
   /* 识别引擎徽标：A/B 各一格（本地/云端），title 里带精修模型现状 */
@@ -1546,6 +1556,7 @@
     els.personaCards = $("#personaCards"); els.personaText = $("#personaText");
     els.personaHint = $("#personaHint"); els.personaOut = $("#personaOut");
     els.btnPersonaSave = $("#btnPersonaSave"); els.btnPersonaClear = $("#btnPersonaClear");
+    els.ggufVocab = $("#ggufVocab"); els.btnVocabSave = $("#btnVocabSave"); els.vocabOut = $("#vocabOut");
     els.speed = $("#speed"); els.speedVal = $("#speedVal");
     els.engA = $("#engA"); els.engB = $("#engB"); els.engC = $("#engC");
     els.liveA = $("#liveA"); els.liveB = $("#liveB"); els.liveC = $("#liveC");
@@ -1721,6 +1732,40 @@
           renderPersona();
           if (els.personaOut) setTx(els.personaOut, txt ? ("已保存 " + txt.length + " 字，下一句就用新口吻") : "已清空，回到预设卡的口吻");
           log("info", "人设口吻 → " + (txt ? txt.length + " 字" : "空"));
+        });
+      });
+    }
+    // 专名表：打字不打扰，点「保存专名」才提交（后端 clamp 去重、单条 24 字、最多 8 条）
+    if (els.ggufVocab) {
+      els.ggufVocab.addEventListener("input", function () { st.vocabDirty = true; });
+    }
+    if (els.btnVocabSave) {
+      els.btnVocabSave.addEventListener("click", function () {
+        var raw = (els.ggufVocab && els.ggufVocab.value || "").replace(/[，;；]/g, ",");
+        var list = raw.split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+        var btn = els.btnVocabSave;
+        if (btn) btn.disabled = true;
+        apiPost("/api/cfg", { asr_gguf_vocab: list }).then(function (j) {
+          if (btn) btn.disabled = false;
+          if (!j || j.ok === false) {
+            if (els.vocabOut) setTx(els.vocabOut, "保存失败：" + ((j && (j.err || j.error)) || "接口没回"));
+            log("err", "专名表保存失败");
+            return;
+          }
+          if (j.cfg) { st.cfg = Object.assign({}, st.cfg, j.cfg); syncControls(); }
+          st.vocabDirty = false;
+          var got = (st.cfg.asr_gguf_vocab || []);
+          if (els.ggufVocab) els.ggufVocab.value = got.join(", ");
+          if (els.vocabOut) {
+            setTx(els.vocabOut, got.length
+              ? ("已保存 " + got.length + " 条：" + got.join(" / ") + "。下一段 GGUF 识别就带上，压不住就删掉那条。")
+              : "已清空专名表，回到纯识别。");
+          }
+          log("info", "专名表 → " + (got.length ? got.join(" / ") : "空"));
+        }).catch(function (e) {
+          if (btn) btn.disabled = false;
+          if (els.vocabOut) setTx(els.vocabOut, "保存失败：" + e.message);
+          log("err", "POST /api/cfg（专名表）失败：" + e.message);
         });
       });
     }

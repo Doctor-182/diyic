@@ -323,6 +323,11 @@
       <section class="card">
         <h2 class="cardhd"><span>识别参数</span><span class="hint">拖动即时生效</span></h2>
         <div class="params" id="params"></div>
+        <div class="injectrow">
+          <input type="text" id="ggufVocab" placeholder="专名表：ゴーストブロー, グラセフ（逗号分隔，最多 8 条）" spellcheck="false" autocomplete="off">
+          <button class="btn primary" id="btnVocabSave" title="只对 GGUF 档（qwen17 / qwen06）生效：把这些专名直接喂给模型，压住音近乱写">保存专名</button>
+        </div>
+        <div class="ttsout" id="vocabOut">专名表只管 GGUF 档，SenseVoice 不用；只放 2–6 个高置信的专名，别塞整句（会被抄进正文）。</div>
       </section>
 
       <section class="card">

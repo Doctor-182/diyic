@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import threading
 import time
@@ -129,6 +130,7 @@ DEFAULTS = {
     "asr_gguf_backend": "cuda",  # cuda | vulkan | cpu（小模型上 vulkan 反而更快）
     "asr_gguf_hint": "auto",     # 是否把语种提示传给模型（auto 传 / off 只让它自己判）
     "asr_gguf_lid": "zh",        # 语种探测：off 不探 / zh 只在明确判出中文时切（推荐）/ any 连 en、ko 也切
+    "asr_gguf_vocab": [],        # 专名表：GGUF 档的 vocabulary（游戏名/人名），2–6 条最稳；空的等于不用
     # 云端引擎的投机识别（只在 asr_engine_* = cloud 时用到）：
     # 最小间隔、单次超时。云端长段识别会飘到十几秒，靠这两个值把并发和延迟关进笼子。
     "asr_spec_gap": 1.5,
@@ -399,7 +401,13 @@ def _coerce(k, v, old):
                     pass
             return dict(ref)
         if isinstance(ref, list):
-            return [int(x) for x in v] if isinstance(v, (list, tuple)) else list(ref)
+            if not isinstance(v, (list, tuple)):
+                return list(ref)
+            # 纯数字列表（ocr_region 这类坐标）强转 int；其余（专名表、音色表）
+            # 原样放行，结构由 clamp_cfg 校验——之前一律 int() 会把字符串表直接吞掉。
+            if ref and all(isinstance(x, int) and not isinstance(x, bool) for x in ref):
+                return [int(x) for x in v]
+            return list(v)
         return str(v) if not isinstance(v, str) else v
     except Exception:
         return old
@@ -473,6 +481,19 @@ def clamp_cfg(d: dict) -> dict:
         d["asr_gguf_hint"] = "auto"
     if d.get("asr_gguf_lid") not in ("off", "zh", "any"):
         d["asr_gguf_lid"] = "zh"
+    raw_vocab = d.get("asr_gguf_vocab")
+    if isinstance(raw_vocab, str):
+        raw_vocab = re.split(r"[,，\n;；]+", raw_vocab)
+    if not isinstance(raw_vocab, (list, tuple)):
+        raw_vocab = []
+    vocab, seen = [], set()
+    for it in raw_vocab:
+        w = str(it or "").strip()
+        if not w or w in seen:
+            continue
+        seen.add(w)
+        vocab.append(w[:24])
+    d["asr_gguf_vocab"] = vocab[:8]
     if d.get("asr_refine") not in ("auto", "whisper", "cloud", "off"):
         d["asr_refine"] = "auto"
     if d.get("asr_local_engine") and d["asr_local_engine"] not in ("sensevoice", "whisper-anime", ""):
