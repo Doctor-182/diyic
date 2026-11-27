@@ -128,6 +128,7 @@ DEFAULTS = {
     "asr_gguf_dir": "",          # 空 = <程序目录>\models\asr
     "asr_gguf_backend": "cuda",  # cuda | vulkan | cpu（小模型上 vulkan 反而更快）
     "asr_gguf_hint": "auto",     # 是否把语种提示传给模型（auto 传 / off 只让它自己判）
+    "asr_gguf_lid": "zh",        # 语种探测：off 不探 / zh 只在明确判出中文时切（推荐）/ any 连 en、ko 也切
     # 云端引擎的投机识别（只在 asr_engine_* = cloud 时用到）：
     # 最小间隔、单次超时。云端长段识别会飘到十几秒，靠这两个值把并发和延迟关进笼子。
     "asr_spec_gap": 1.5,
@@ -470,6 +471,8 @@ def clamp_cfg(d: dict) -> dict:
         d["asr_gguf_backend"] = "cuda"
     if d.get("asr_gguf_hint") not in ("auto", "off"):
         d["asr_gguf_hint"] = "auto"
+    if d.get("asr_gguf_lid") not in ("off", "zh", "any"):
+        d["asr_gguf_lid"] = "zh"
     if d.get("asr_refine") not in ("auto", "whisper", "cloud", "off"):
         d["asr_refine"] = "auto"
     if d.get("asr_local_engine") and d["asr_local_engine"] not in ("sensevoice", "whisper-anime", ""):

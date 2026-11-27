@@ -41,6 +41,9 @@ def _models_dir() -> str:
 
 
 SV_DIR = os.path.join(_models_dir(), "sensevoice")
+_LID_TAG = re.compile(r"^<\|([a-z]{2,3})\|>$")
+_LID_KEEP = ("zh", "en", "ja", "ko", "yue")
+_KANA_CH = re.compile(r"[\u3040-\u30ff]")
 ASR_PATH = "/api/v1/services/aigc/multimodal-generation/generation"
 ASR_MODEL = "qwen-audio-3.0-asr-flash"
 
@@ -186,6 +189,42 @@ class LocalASR:
         txt = re.sub(r"(?<=[\u3040-\u30ff\u4e00-\u9fff\u3005-\u3007])\s+"
                      r"(?=[\u3040-\u30ff\u4e00-\u9fff\u3005-\u3007])", "", txt)
         return util.clean_text(txt)
+
+    def lid(self, pcm16: np.ndarray) -> str:
+        """这段话像什么语种：跑一遍前向，读第一个 <|xx|> 标签（language=auto）。
+
+        实测（20261126 社交实录 200 段，对上云端判定的语种）：
+          · 判 zh 精确率 100%、召回 80%（漏的全是 8 s 以上、一段里好几个话轮的）
+          · 判 en 有误报（3 段日语被说成 en），所以只敢信 zh/yue
+          · 吐标签的 128 段里一致率 96%，不吐标签（62 段）就当「不确定」
+        因此它只用来决定「要不要换提示」，绝不当硬门控——判错代价不对称：
+        把中文当日语会整句被翻成日语，把日语当中文只是那一段更差。
+        """
+        if not self.ready():
+            return ""
+        feats = _fbank(pcm16, self._mel)
+        if feats is None:
+            return ""
+        f = _lfr(feats, self._meta["lfr_m"], self._meta["lfr_n"])
+        f = (f + self._meta["neg_mean"][: f.shape[1]]) * self._meta["inv_stddev"][: f.shape[1]]
+        out = self._sess.run(["logits"], {
+            "x": f[None, :, :].astype(np.float32),
+            "x_length": np.array([f.shape[0]], dtype=np.int32),
+            "language": np.array([0], dtype=np.int32),
+            "text_norm": np.array([self._meta["noitn"]], dtype=np.int32),
+        })[0]
+        ids = out[0].argmax(axis=1)
+        prev = -1
+        for i in ids:
+            i = int(i)
+            if i == prev or i == 0:
+                prev = i
+                continue
+            prev = i
+            m = _LID_TAG.match(self._tok.get(i, ""))
+            if m and m.group(1) in _LID_KEEP:
+                return m.group(1)
+        return ""
 
 
 def _mel_fb(n_mels=80, sr=16000, nfft=512, low=20.0, high=None):
@@ -376,6 +415,57 @@ class Transcriber:
             self.log("本地引擎选档（%s）：%s" % (lang, why or (eid or "无")), "info", "asr")
         return eid, why
 
+    def _lid_start(self, pcm16, lang):
+        """开一条旁路线判语种；关掉 / 没载入 / 语种不在白名单就返回 (None, {})。"""
+        mode = str(self.cfg.get("asr_gguf_lid", "zh") or "off").lower()
+        if mode == "off" or lang not in ("ja", "zh", "en"):
+            return None, {}
+        if not self.local.ready():
+            return None, {}
+        box = {}
+
+        def run():
+            try:
+                box["lid"] = self.local.lid(pcm16)
+            except Exception as exc:                 # noqa: BLE001
+                box["lid"] = ""
+                box["err"] = repr(exc)
+
+        th = threading.Thread(target=run, name="lid-probe", daemon=True)
+        th.start()
+        return th, box
+
+    def _lid_wait(self, th, box, want="", txt=""):
+        """等旁路线，返回该换的语种（""=不换）。
+
+        分级信任（200 段真实语料实测）：
+          zh/yue —— 探测头精确率 100%、召回 75%，误报 0：默认就切，救回被 ja 提示
+                    硬翻成日语的中文段（zh 段 CER 50.0% → 3.1%）。
+          ja     —— 精确率 99%：它说 ja 就信 ja，别再折腾。
+          en/ko  —— 探测头对 en 不可信（精确率 0–6%）：只有 mode=any 才认，
+                    且「探测没吭声 + 结果里一个假名都没有」时也按英语试一次。
+        """
+        if th is None:
+            return ""
+        th.join(3.0)
+        if box.get("err"):
+            self.log("语种探测失败：%s" % box["err"][:80], "warn", "asr")
+        lid = str(box.get("lid") or "")
+        if lid in ("zh", "yue"):
+            return "zh"
+        mode = str(self.cfg.get("asr_gguf_lid", "zh") or "zh").lower()
+        if mode != "any" or lid in ("ja", "zh", "yue"):
+            return ""                      # 默认只信 zh；探测说 ja 就别换
+        if lid in ("en", "ko"):
+            return lid
+        if want == "ja" and txt:
+            # 钉了 ja 却一个假名都没有、汉字也没有、拉丁成片 —— 那就是英语。
+            _lat = sum(1 for ch in txt if ch.isascii() and ch.isalpha())
+            _han = sum(1 for ch in txt if "一" <= ch <= "鿿")
+            if _lat >= 3 and _han <= 1 and not _KANA_CH.search(txt):
+                return "en"
+        return ""
+
     def transcribe_fast(self, pcm16, lang="auto", e=None) -> tuple[str, str, float]:
         """只要最快的结果：(text, engine, ms)。hybrid 时本地优先，失败退云端。
 
@@ -385,22 +475,39 @@ class Transcriber:
         t0 = time.time()
         if e in asr_gguf.ENGINES:
             # GGUF 档（qwen17 / qwen06 / fun）：一次只驻留一个模型，换档由 asr_gguf 负责卸载旧的。
-            txt, meta = asr_gguf.transcribe(e, pcm16, lang, self.cfg,
+            # 语种：qwen 的输出协议是「先写一句 language X<asr_text> 再写正文」，
+            # 这一句就是它的语种判定，而且没有概率、不许反悔——写错整句就换语种。
+            # 所以用外部廉价 LID（SenseVoice 的 <|xx|>）决定钉哪个提示，
+            # 只对「明确是中文」的段做单向切换（判错代价不对称，见 lid() 注释）。
+            want = lang
+            th, box = self._lid_start(pcm16, lang)
+            txt, meta = asr_gguf.transcribe(e, pcm16, want, self.cfg,
                                             hint=self.cfg.get("asr_gguf_hint", "auto"))
             txt = util.clean_text(txt or "")
             ms = float(meta.get("ms") or 0.0)
+            pick = self._lid_wait(th, box, want, txt)
+            if pick and pick != want:
+                t2 = time.time()
+                txt2, meta2 = asr_gguf.transcribe(e, pcm16, pick, self.cfg, hint=pick)
+                txt2 = util.clean_text(txt2 or "")
+                if txt2 and util.lang_ok(txt2, pick):
+                    self.log("语种探测：这段像 %s，按它重听一遍（%.0f ms）%r"
+                             % (pick, (time.time() - t2) * 1000.0, txt2[:36]), "info", "asr")
+                    txt, meta, ms, want = txt2, meta2, float(meta2.get("ms") or 0.0), pick
+                else:
+                    self.log("语种探测提示 %s，但重听没出合语种的字，保留原结果" % pick, "warn", "asr")
             if txt:
                 # 语种漂移守卫：20261127 01:00–02:00 KTV 实录里，qwen17 在唱段 6/10 段
                 # 把日语写成英文（"I finally found you…"）或罗马字，字幕和翻译全废；
                 # 0.6B 会漂韩文、Fun 会漂英文+瞎补。判据直接用 lang_ok（ja 要假名≥15%），
                 # 命中就用 SenseVoice 重听一遍——它 0 复读 0 漂移，宁可字差也不要整句外语。
-                why = util.lang_why(txt, lang) if lang in ("ja", "zh", "en") else ""
+                why = util.lang_why(txt, want) if want in ("ja", "zh", "en") else ""
                 if why:
                     self.log("%s 输出语种不对（想要 %s，实际 %s）：%r → 退回 SenseVoice"
                              % (e, lang, why, txt[:48]), "warn", "asr")
                     if self.local.ready():
-                        lt = util.clean_text(self.local.transcribe(pcm16, lang) or "")
-                        if lt and util.lang_ok(lt, lang):
+                        lt = util.clean_text(self.local.transcribe(pcm16, want) or "")
+                        if lt and util.lang_ok(lt, want):
                             return lt, "local(漂移)", (time.time() - t0) * 1000.0
                     return txt, e, ms          # 本地也漂：保留原结果，别变成空字幕
                 return txt, e, ms
@@ -409,7 +516,7 @@ class Transcriber:
             why = str(meta.get("err") or "空结果")[:80]
             self.log("%s 没出字（%s），退回本地 SenseVoice" % (e, why), "warn", "asr")
             if self.local.ready():
-                lt = util.clean_text(self.local.transcribe(pcm16, lang) or "")
+                lt = util.clean_text(self.local.transcribe(pcm16, want) or "")
                 if lt:
                     return lt, "local(兜底)", (time.time() - t0) * 1000.0
             return "", e, ms
