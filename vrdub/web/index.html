@@ -322,6 +322,15 @@
 
       <section class="card">
         <h2 class="cardhd"><span>识别参数</span><span class="hint">拖动即时生效</span></h2>
+        <div class="clang" style="margin:0 0 12px">
+          <span class="elab">分语种</span>
+          <select data-cfg="asr_gguf_lid" title="GGUF 档（qwen17 / qwen06）先说一句语种再写正文，说错整句就翻成那个语种。这个开关让 SenseVoice 的语种头当探头（与识别并行，正常段落零额外等待），明确判出是中文就换中文提示重听一遍。实测：中文段 CER 50.0% → 3.1%，日语段不动，误报 0。">
+            <option value="zh">只救中文（推荐）</option>
+            <option value="any">连英语也照顾</option>
+            <option value="off">关（一律按固定语种）</option>
+          </select>
+          <span class="hint">SenseVoice 当探头</span>
+        </div>
         <div class="params" id="params"></div>
         <div class="injectrow">
           <input type="text" id="ggufVocab" placeholder="专名表：ゴーストブロー, グラセフ（逗号分隔，最多 8 条）" spellcheck="false" autocomplete="off">

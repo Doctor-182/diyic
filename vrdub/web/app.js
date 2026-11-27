@@ -1608,6 +1608,7 @@
         if (k === "mic_dev" || k === "out_dev" || k === "loop_dev") log("info", "切换设备 " + k + " → " + v);
         if (k === "asr_engine") { st.last.A = null; st.last.B = null; renderChains(); }
         if (/^danmaku_/.test(k)) log("info", "弹幕 " + k + " → " + v);
+        if (k === "asr_gguf_lid") log("info", "分语种探测 → " + (v === "zh" ? "只救中文" : v === "any" ? "连英语也照顾" : "关"));
       });
     });
 
