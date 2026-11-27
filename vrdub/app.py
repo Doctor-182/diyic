@@ -1052,6 +1052,7 @@ class App:
             "last": self.bus.recent(50),
             "mic": dict(self.bus.mic), "status": dict(self.bus.status),
             "asr": {"engine": self.asr.engine(), "local": self.asr.local.note,
+                    "sv_dir": self.asr.local.sv_dir,
                     "a": self.chain_a.engine(), "b": self.chain_b.engine(),
                     # 引擎选档（注册表按这台机器的条件算出来的，换机器就换答案）
                     "pick": {lg: (self.asr.pick_local(lg)[0] or "-") for lg in ("zh", "ja")},
@@ -1274,6 +1275,10 @@ class App:
         if keys & {"asr_engine", "asr_engine_a", "asr_engine_b",
                    "asr_gguf_dir", "asr_gguf_backend", "asr_gguf_hint"}:
             self._apply_gguf(keys)
+        if "sv_dir" in keys:
+            # 换本地 SenseVoice 权重（衍生微调版）：热卸载 → 下次用到按新目录载入。
+            msg = self.asr.reload_local()
+            util.log(msg, "info", "cfg")
         if keys & {"card", "persona_custom"}:
             if "persona_custom" in keys:
                 pc = personamod.set_custom(str(self.cfg.get("persona_custom") or ""))

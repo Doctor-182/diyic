@@ -73,14 +73,26 @@ class LocalASR:
     任何一项改动都要重新对云端结果验证。
     """
 
-    def __init__(self, log=util.log):
+    def __init__(self, log=util.log, sv_dir=None):
         self.log = log
+        self.sv_dir = sv_dir or SV_DIR      # 可以指向别的 SenseVoice 权重目录（衍生微调版）
         self._sess = None
         self._tok = {}
         self._meta = {}
         self._mel = None
         self._lk = threading.Lock()
         self.note = "未加载"
+
+    def set_dir(self, path: str) -> bool:
+        """换一套权重（衍生微调版）。换完立刻卸载，下次用到自动按新目录载入。"""
+        path = (path or "").strip() or SV_DIR
+        if path == self.sv_dir:
+            return False
+        had = self.unload()
+        self.sv_dir = path
+        self._tok = {}
+        self._meta = {}
+        return True
 
     def ready(self) -> bool:
         self._load()
@@ -117,8 +129,8 @@ class LocalASR:
             except Exception as e:          # noqa: BLE001
                 self.note = f"onnxruntime 不可用：{e!r}"
                 return
-            m = os.path.join(SV_DIR, "model.int8.onnx")
-            t = os.path.join(SV_DIR, "tokens.txt")
+            m = os.path.join(self.sv_dir, "model.int8.onnx")
+            t = os.path.join(self.sv_dir, "tokens.txt")
             if not (os.path.exists(m) and os.path.exists(t)):
                 self.note = f"模型缺失：{m}"
                 return
@@ -304,14 +316,26 @@ class Transcriber:
         self.cfg = cfg
         self.net = net
         self.log = log
-        self.local = LocalASR(log)
+        self.local = LocalASR(log, (cfg.get("sv_dir") or "").strip() or None)
         self.cloud = CloudASR(net, log)
         self.ja = None                      # 日语精修（用得着才载）
         self._pool = None
 
     def warm(self):
         if self.local.ready():
-            self.log("本地识别就绪：" + self.local.note, "info", "asr")
+            self.log("本地识别就绪：" + self.local.note + "（" + self.local.sv_dir + "）", "info", "asr")
+
+    def reload_local(self) -> str:
+        """按 cfg.sv_dir 重新指向本地权重并热载入。返回给人看的一句话。"""
+        want = (self.cfg.get("sv_dir") or "").strip() or None
+        self.local.set_dir(want or "")
+        if self.local.ready():
+            msg = "本地识别已换权重：" + self.local.note + "（" + self.local.sv_dir + "）"
+            self.log(msg, "info", "asr")
+            return msg
+        msg = "本地识别不可用：" + str(self.local.note)
+        self.log(msg, "warn", "asr")
+        return msg
 
     def engine(self) -> str:
         return str(self.cfg.get("asr_engine", "hybrid"))

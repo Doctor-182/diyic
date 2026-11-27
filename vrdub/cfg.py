@@ -139,6 +139,9 @@ DEFAULTS = {
     # 换到朋友那台机器上不需要改代码：注册表自己会算出该跑哪一个。
     "asr_local_engine": "",
     "asr_engine_map": {},
+    # 本地 SenseVoice 权重目录（空 = models/sensevoice）。指向别的目录就能换成
+    # 衍生微调版（如社区日语/BGM 微调版），必须含 model.int8.onnx + tokens.txt。
+    "sv_dir": "",
     # 把每条定稿音频连同识别文本落盘（out/corpus/日期/），用来在自己的真实语音上 A/B 引擎。
     # 默认关：只在你打算「拿真话测模型」时打开。
     "asr_capture": False,
@@ -471,6 +474,7 @@ def clamp_cfg(d: dict) -> dict:
         d["asr_refine"] = "auto"
     if d.get("asr_local_engine") and d["asr_local_engine"] not in ("sensevoice", "whisper-anime", ""):
         d["asr_local_engine"] = ""
+    d["sv_dir"] = str(d.get("sv_dir") or "").strip()[:300]
     raw_map = d.get("asr_engine_map")
     if not isinstance(raw_map, dict):
         d["asr_engine_map"] = {}
