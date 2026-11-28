@@ -141,6 +141,7 @@ class Resident:
         self.err = ""
         self.loaded_at = 0.0
         self.n_runs = 0
+        self._snap = {}          # 上一次拿得到锁时的快照（info 拿不到锁就用它，绝不阻塞）
 
     # ---------------------------------------------------------------- 内部
     def _drop(self):
@@ -204,13 +205,31 @@ class Resident:
                 ENGINES[eid]["vram_mb"]), "info", "asr.gguf")
             return self.session, ""
 
+    def _snap_now(self) -> dict:
+        e = ENGINES.get(self.key) or {}
+        return {"key": self.key, "name": e.get("name", ""),
+                "backend": self.backend or e.get("backend", ""),
+                "load_ms": self.load_ms, "runs": self.n_runs,
+                "vram_mb": e.get("vram_mb", 0), "err": self.err,
+                "secs": round(time.time() - self.loaded_at, 1) if self.loaded_at else 0}
+
     def info(self) -> dict:
-        with self._lock:
-            e = ENGINES.get(self.key) or {}
-            return {"key": self.key, "name": e.get("name", ""), "backend": self.backend or e.get("backend", ""),
-                    "load_ms": self.load_ms, "runs": self.n_runs,
-                    "vram_mb": e.get("vram_mb", 0), "err": self.err,
-                    "secs": round(time.time() - self.loaded_at, 1) if self.loaded_at else 0}
+        r"""报「现在驻留谁」。**绝不阻塞**。
+
+        acquire() 载模型时是一直握着这把锁的（CUDA 首次 JIT 实测能握 60 s），
+        早先 info() 直接 with self._lock 会跟着一起卡住 —— 表现为整个控制台
+        /api/state 无响应、网页每 3 秒重连、子窗口以为后端死了自杀重启。
+        现在拿不到锁就回上次的快照 + busy=True，让界面显示「载入中」。
+        """
+        got = self._lock.acquire(blocking=False)
+        if got:
+            try:
+                self._snap = self._snap_now()
+            finally:
+                self._lock.release()
+        snap = dict(self._snap or {})
+        snap["busy"] = not got
+        return snap
 
 
 RES = Resident()

@@ -73,6 +73,7 @@ def mk(cloud_text="", local_text="", **cfg):
     c._is_echo = lambda *a, **k: False
     c._bleed = lambda *a, **k: False
     c._overlap_bleed = lambda *a, **k: False
+    c.spk = None                 # 分人只挂 B 链；这里没有 Speaker 实例
     return c
 
 

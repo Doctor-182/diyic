@@ -224,10 +224,16 @@ DEFAULTS = {
     "danmaku_style": "card",    # card 卡片 / plain 纯描边 / bar 只留色条 / neon 发光
     "danmaku_src": True,        # 副行显示原文
     # 分人（说话人分离）：只给 B 链看「这句话像不像同一个人在说」
+    "ball_on": True,            # 桌面悬浮球（点开就能改 A 链语言/设备、打一句中文发聊天框）
+    "spkui_on": True,           # 说话人名单窗口（起名、删人、调门限）
     "spk_on": True,             # 开关；关掉 = 不算向量、不标号（省 100 ms CPU/段）
     "spk_th": 0.72,             # 判同一人的余弦门限（0.4–0.98）
     "spk_max": 12,              # 最多记几个人（2–24）；满了淘汰「没起名且最久没出现」的，起过名的永不淘汰
-    "spk_secs": 1.5,            # 每段最多取前多久算向量（越长越准越慢）
+    "spk_secs": 2.0,            # 掐完静音后最多取前多久算向量（越长越准越慢）
+    "spk_tta": True,            # 双窗平均：段 >= 2.4 s 时多算一次取平均（+80 ms，抖动减半）
+    "spk_merge": 0.70,          # 碎簇合并：「没起名 + 只出现 1–2 次」的小簇，余弦超这个就并进更像的那位
+                                # 为什么要低于 spk_th(0.72)：新簇只在「全员都 < 门限」时才诞生，
+                                # 同一个人被拆成两号时两个碎簇彼此常在 0.6–0.7，按 0.82 永远并不掉；0 = 关
     "spk_model": "",            # 模型路径，空 = 项目根 models/spk/voxceleb.onnx
     # OCR
     "ocr_region": [0, 0, 0, 0],
@@ -481,7 +487,11 @@ def clamp_cfg(d: dict) -> dict:
     d["danmaku_top"] = max(0.0, min(0.5, float(d.get("danmaku_top", 0.12) or 0.0)))
     d["spk_th"] = max(0.40, min(0.98, float(d.get("spk_th", 0.72) or 0.72)))
     d["spk_max"] = max(2, min(24, int(d.get("spk_max", 12) or 12)))
-    d["spk_secs"] = max(0.6, min(6.0, float(d.get("spk_secs", 1.5) or 1.5)))
+    d["spk_secs"] = max(0.6, min(6.0, float(d.get("spk_secs", 2.0) or 2.0)))
+    d["spk_tta"] = bool(d.get("spk_tta", True))
+    d["spk_merge"] = max(0.0, min(0.98, float(d.get("spk_merge", 0.70) or 0.0)))
+    d["ball_on"] = bool(d.get("ball_on", True))
+    d["spkui_on"] = bool(d.get("spkui_on", True))
     d["hud_rows"] = max(1, min(30, int(d.get("hud_rows", 8))))
     d["ocr_fps"] = max(1, min(12, int(d.get("ocr_fps", 6))))
     d["asr_spec_gap"] = max(0.4, min(8.0, float(d.get("asr_spec_gap", 1.5))))

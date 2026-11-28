@@ -2,7 +2,7 @@
 """子进程调度：源码运行时是「python + 脚本」，冻结成 exe 之后是「VRDub.exe --child NAME」。
 
 为什么要有这一层：
-- hud / danmaku / ocr_overlay / region_picker 原先都是 `python.exe vrdub/xxx.py` 起的；
+- hud / danmaku / ocr_overlay / region_picker / ball / spkui 原先都是 `python.exe vrdub/xxx.py` 起的；
 - PyInstaller 打包后 sys.executable 变成 VRDub.exe，再拿脚本路径去启动，等于让 exe 去
   "执行某个 .py"，必然起不来（不报错、不闪窗，静默失败）；
 - 所以统一走一个入口：入口里先看 --child NAME，命中就直接跑那个子程序，否则才走主程序。
@@ -29,6 +29,8 @@ CHILDREN = {
     "danmaku": "vrdub.danmaku",
     "ocr_overlay": "vrdub.ocr_overlay",
     "region_picker": "vrdub.region_picker",
+    "ball": "vrdub.ball",          # 桌面悬浮球：点开改 A 链语言/设备、打一句中文发聊天框
+    "spkui": "vrdub.spkui",        # 说话人名单：改名字、删人、全清、门限
 }
 
 _RUNNERS = {
@@ -36,6 +38,8 @@ _RUNNERS = {
     "danmaku": lambda mod, rest: mod.main(),
     "ocr_overlay": lambda mod, rest: mod.Overlay({}).run(),
     "region_picker": lambda mod, rest: mod.main(rest),
+    "ball": lambda mod, rest: mod.main(rest),
+    "spkui": lambda mod, rest: mod.main(rest),
 }
 
 

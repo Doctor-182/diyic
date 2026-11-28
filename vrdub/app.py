@@ -13,6 +13,7 @@ import collections
 import json
 import os
 import queue
+import re
 import subprocess
 import traceback
 import sys
@@ -110,6 +111,8 @@ class App:
         self.hud_log = None
         self.danmaku = None
         self.danmaku_log = None
+        self._ui = {}              # {"ball": Popen, "spkui": Popen} 两个小窗口
+        self._ui_log = {}
         self._io_lk = threading.Lock()
         self.last_crop = None
         self._dev_cache = (0.0, None)
@@ -155,6 +158,12 @@ class App:
             self.danmaku_start()
         if self.use_hud and self.cfg.get("ocr_overlay", True):
             self.overlay_start()
+        # 小窗口：悬浮球（点开改语言/设备、打一句中文发聊天框）+ 说话人名单窗口。
+        # 它们不接 stdin 管道，全部靠 HTTP 轮询后端，所以和后端谁先谁后都没关系。
+        if self.cfg.get("ball_on", True):
+            self.ui_start("ball")
+        if self.cfg.get("spkui_on", True):
+            self.ui_start("spkui")
         threading.Thread(target=self._fanout, name="fanout", daemon=True).start()
         threading.Thread(target=self._tick, name="tick", daemon=True).start()
         threading.Thread(target=self._mem_watch, name="mem", daemon=True).start()
@@ -734,7 +743,69 @@ class App:
                         self.overlay_send(self._overlay_cfg())
                 elif self.overlay is not None:
                     self.overlay_stop()
+                for nm, key in (("ball", "ball_on"), ("spkui", "spkui_on")):
+                    p = self._ui.get(nm)
+                    if bool(self.cfg.get(key, True)) and self.use_hud:
+                        if p is None or p.poll() is not None:
+                            self.ui_start(nm)
+                    elif p is not None and p.poll() is None:
+                        self.ui_stop(nm)
             time.sleep(0.25)
+
+    # ================================================================ 小窗口
+    def ui_start(self, name):
+        """起一个小窗口子进程（ball=悬浮球 / spkui=说话人名单）。
+
+        和 hud/danmaku 的区别：这两个窗口不接 stdin 管道，全部靠 HTTP 轮询后端
+        （/api/state、/api/spk、/api/text_send），所以不需要 ping 保活、也不需要
+        往下推配置——界面自己拉。好处是后端重启（端口不变）它们能自己缓过来。
+        """
+        if not self.use_hud or not childmod.exists(name):
+            return False
+        cur = self._ui.get(name)
+        if cur is not None and cur.poll() is None:
+            return True
+        env = dict(os.environ)
+        env["PYTHONIOENCODING"] = "utf-8"
+        env.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
+        try:
+            env["VRDUB_PORT"] = str(int(getattr(self.server, "port", 0)
+                                       or os.environ.get("VRDUB_PORT") or 8899))
+        except Exception:                               # noqa: BLE001
+            pass
+        try:
+            log = open(os.path.join(cfgmod.OUT, name + ".log"), "ab")
+            p = subprocess.Popen(childmod.argv(name), stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=log,
+                                 cwd=ROOT, env=env, creationflags=CREATE_NO_WINDOW)
+            self._ui[name] = p
+            self._ui_log[name] = log
+            util.log(f"{name} 起 pid={p.pid}", "info", name)
+            return True
+        except Exception as e:                          # noqa: BLE001
+            util.log(f"{name} 起不来：{e!r}", "warn", name)
+            return False
+
+    def ui_stop(self, name):
+        p = self._ui.pop(name, None)
+        if p is not None:
+            try:
+                p.terminate()
+            except Exception:                           # noqa: BLE001
+                pass
+            util.log(f"{name} 停", "info", name)
+        fh = self._ui_log.pop(name, None)
+        if fh is not None:
+            try:
+                fh.close()
+            except Exception:                           # noqa: BLE001
+                pass
+
+    def ui_state(self, name):
+        p = self._ui.get(name)
+        return {"on": bool(self.cfg.get(name + "_on", True)),
+                "pid": int(getattr(p, "pid", 0) or 0),
+                "alive": bool(p is not None and p.poll() is None)}
 
     # ================================================================ 浮窗
     def hud_start(self):
@@ -1037,42 +1108,128 @@ class App:
             pass
 
     # ---------------------------------------------------------------- 分人名单
+    def _spk_deco(self, st):
+        """给说话人统计补一行「最近说了什么」——窗口里只有编号看不出是谁，加一句最有用。"""
+        rows = (st or {}).get("list") or []
+        last = {}
+        try:
+            segs = list(self.bus.segs)[-160:]
+        except Exception:                               # noqa: BLE001
+            segs = []
+        for s in reversed(segs):
+            k = s.get("spk")
+            if not k:
+                continue
+            try:
+                k = int(k)
+            except Exception:                           # noqa: BLE001
+                continue
+            if k in last:
+                continue
+            txt = str(s.get("dst") or s.get("src") or "").strip()
+            if txt:
+                last[k] = txt[:40]
+        for r in rows:
+            try:
+                r["last"] = last.get(int(r.get("id") or 0), "")
+            except Exception:                           # noqa: BLE001
+                r["last"] = ""
+        return st
+
     def api_spk(self, body):
         """GET（空 body）→ 名单；POST {action: name|forget|reset, id, name}。"""
         body = body or {}
         act = str(body.get("action") or "").strip().lower()
         if act == "name":
             ok = self.spk.set_name(body.get("id"), body.get("name"))
-            return {"ok": ok, "spk": self.spk.stats(),
+            return {"ok": ok, "spk": self._spk_deco(self.spk.stats()),
                     "err": "" if ok else "没有这个编号"}
         if act == "forget":
             ok = self.spk.forget(body.get("id"))
-            return {"ok": ok, "spk": self.spk.stats(),
+            return {"ok": ok, "spk": self._spk_deco(self.spk.stats()),
                     "err": "" if ok else "没有这个编号"}
         if act == "reset":
             self.spk.reset()
-            return {"ok": True, "spk": self.spk.stats()}
-        return {"ok": True, "spk": self.spk.stats()}
+            return {"ok": True, "spk": self._spk_deco(self.spk.stats())}
+        return {"ok": True, "spk": self._spk_deco(self.spk.stats())}
+
+    def api_stacks(self, body=None):
+        r"""把当前所有线程的调用栈抓出来（排查「某个接口卡住」时唯一的硬证据）。
+
+        只写文件、不打断任何线程：卡住的 handler 线程会带着它的帧留在栈里。
+        """
+        import sys
+        import traceback
+        frames = sys._current_frames()
+        parts = []
+        for tid, fr in frames.items():
+            parts.append("=== thread %s ===" % tid)
+            parts.extend(traceback.format_stack(fr))
+        txt = chr(10).join(parts)
+        p = os.path.join(pathmod.LOG_DIR, "stacks.txt")
+        try:
+            os.makedirs(pathmod.LOG_DIR, exist_ok=True)
+            with open(p, "w", encoding="utf-8") as fh:
+                fh.write(txt)
+        except Exception:                               # noqa: BLE001
+            p = ""
+        return {"ok": True, "path": p, "text": txt[:6000]}
 
     def state(self):
+        t0 = [time.time()]
+
+        def lap(name):
+            now = time.time()
+            dt = (now - t0[0]) * 1000.0
+            t0[0] = now
+            if dt > 400:
+                util.log("state 慢：%s 花了 %.0f ms" % (name, dt), "warn", "srv")
+
         c = cfgmod.clamp_cfg(self.cfg.all())
         segs = self.bus.segs
+        devs = self.devices()
+        lap("cfg+devices")
+        voices = self.voice_list()
+        met = {k: metrics.summarize(segs, k) for k in ("A", "B", "C")}
+        lap("voices+metrics")
+        spkst = self._spk_deco(self.spk.stats())
+        win = {nm: self.ui_state(nm) for nm in ("ball", "spkui")}
+        lap("spk+win")
+        last = self.bus.recent(50)
+        ocr_ready = bool(self.ocr is not None)
+        ocr_stat = (self.ocr.stats() or {}) if self.ocr is not None else {}
+        lap("recent+ocr")
+        asrd = {"engine": self.asr.engine(), "local": self.asr.local.note,
+                "sv_dir": self.asr.local.sv_dir,
+                "a": self.chain_a.engine(), "b": self.chain_b.engine(),
+                "pick": {lg: (self.asr.pick_local(lg)[0] or "-") for lg in ("zh", "ja")},
+                "host": self.host_cond(),
+                "refine": str(c.get("asr_refine", "auto")),
+                "ja": (self.asr.ja.stat() if self.asr.ja is not None
+                       else {"device": "-", "note": "未加载"}),
+                "gguf": asr_gguf.RES.info(),
+                "gguf_models": asr_gguf.catalog(c)}
+        lap("asr")
+        logs = util.recent_logs(30)
+        lap("logs")
         return {
             "ok": True, "ver": version.short(), "ver_full": version.full(),
             "frozen": version.frozen(), "pid": os.getpid(),
             "uptime_s": round(time.time() - self.t0, 1),
-            "cfg": c, "devices": self.devices(), "voices": self.voice_list(),
+            "cfg": c, "devices": devs, "voices": voices,
             "voice_job": (dict(self.voice_job) if isinstance(self.voice_job, dict) else None),
             # 人设卡（预设 + 自定义口吻）。前端只读这里，不写死三张卡的名字。
             "persona": personamod.describe(),
-            "metrics": {k: metrics.summarize(segs, k) for k in ("A", "B", "C")},
+            "metrics": met,
             # 分人：几个簇、每簇几段、耗时（界面上的「分人」行读这个）
-            "spk": self.spk.stats(),
+            "spk": spkst,
             "hud": {"on": bool(c.get("hud_on")), "pid": getattr(self.hud, "pid", 0) or 0,
                     "alive": bool(self.hud is not None and self.hud.poll() is None)},
             "danmaku": {"on": bool(c.get("danmaku")),
                         "pid": getattr(self.danmaku, "pid", 0) or 0,
                         "alive": bool(self.danmaku is not None and self.danmaku.poll() is None)},
+            # 小窗口（悬浮球 / 说话人）——前端和窗口自己都读这里
+            "win": win,
             "overlay": {"on": bool(c.get("ocr_overlay")),
                         "pid": getattr(self.overlay, "pid", 0) or 0,
                         "alive": bool(self.overlay is not None and self.overlay.poll() is None),
@@ -1082,36 +1239,24 @@ class App:
                     "src": str(c.get("ocr_src", "auto")),
                     "on": bool(c.get("ocr_on")),
                     "region": list(c.get("ocr_region") or []),
-                    "ready": bool(self.ocr is not None),
-                    "vl": int((self.ocr.stats() or {}).get("vl", 0)) if self.ocr is not None else 0,
-                    "vl_ms": float((self.ocr.stats() or {}).get("last_vl_ms", 0.0)) if self.ocr is not None else 0.0,
+                    "ready": ocr_ready,
+                    "vl": int(ocr_stat.get("vl", 0)),
+                    "vl_ms": float(ocr_stat.get("last_vl_ms", 0.0)),
                     "strip": bool(c.get("ocr_label_strip", False))},
             "key": dict(getattr(getattr(self, "hotkeys", None), "last", {}) or {}),
             "osc": {"on": bool(c.get("chatbox_on")), "host": c.get("osc_host"),
                     "port": c.get("osc_port"), "stat": dict(getattr(self.osc, "stat", {}) or {})},
-            "last": self.bus.recent(50),
+            "last": last,
             "mic": dict(self.bus.mic), "status": dict(self.bus.status),
-            "asr": {"engine": self.asr.engine(), "local": self.asr.local.note,
-                    "sv_dir": self.asr.local.sv_dir,
-                    "a": self.chain_a.engine(), "b": self.chain_b.engine(),
-                    # 引擎选档（注册表按这台机器的条件算出来的，换机器就换答案）
-                    "pick": {lg: (self.asr.pick_local(lg)[0] or "-") for lg in ("zh", "ja")},
-                    "host": self.host_cond(),
-                    # 注意：这里绝不能调 refiner()——它会把精修模型load进来，
-                    # 光是打开控制台就吃掉 1.1 GB 显存。只报「已经载着的」状态。
-                    "refine": str(c.get("asr_refine", "auto")),
-                    "ja": (self.asr.ja.stat() if self.asr.ja is not None
-                           else {"device": "-", "note": "未加载"}),
-                    # GGUF 档（qwen17 / qwen06 / fun）：同一时刻只驻留一个，
-                    # 这里报的是「现在占着显存的是谁、吃了多少」，换档时控制台能直接看见。
-                    "gguf": asr_gguf.RES.info(),
-                    "gguf_models": asr_gguf.catalog(c)},
+            # 注意：这里绝不能调 refiner()——它会把精修模型 load 进来，光是打开控制台
+            # 就吃掉 1.1 GB 显存。只报「已经载着的」状态。
+            "asr": asrd,
             "loop": {"src": str(c.get("loop_src", "process")),
                      "proc": str(c.get("loop_proc", "VRChat.exe")),
                      "pid": int(getattr(self.proc_loop, "pid", 0) or 0),
                      "alive": bool(self.proc_loop is not None and self.proc_loop.running),
                      "stat": dict(getattr(self.proc_loop, "stats", {}) or {})},
-            "logs": util.recent_logs(30),
+            "logs": logs,
         }
 
     def _st_event(self):
@@ -1375,6 +1520,16 @@ class App:
                 self.danmaku_stop()
             util.log("弹幕浮窗：" + ("开" if self.cfg.get("danmaku", True) else "关"),
                      "info", "danmaku")
+        if keys & {"ball_on", "spkui_on"}:
+            for nm in ("ball", "spkui"):
+                if (nm + "_on") not in keys:
+                    continue
+                if self.cfg.get(nm + "_on", True) and self.use_hud:
+                    self.ui_start(nm)
+                else:
+                    self.ui_stop(nm)
+                util.log(("悬浮球" if nm == "ball" else "说话人窗口")
+                         + ("：开" if self.cfg.get(nm + "_on", True) else "：关"), "info", nm)
         if keys & {"chatbox_on", "chatbox_notify", "osc_host", "osc_port"}:
             self.osc.host = str(self.cfg.get("osc_host", "127.0.0.1"))
             self.osc.port = int(self.cfg.get("osc_port", 9000))
@@ -1489,6 +1644,96 @@ class App:
                "ms": round((time.time() - t0) * 1000, 1)}
         util.log(f"回环注入：{text[:20]} → {dst[:20]} → #{dev} {audio_s:.1f}s", "info", "test")
         return res
+
+    # ---------------------------------------------------------------- 小窗口 / 打一句
+    def api_win(self, body):
+        """GET（空 body）→ 两个小窗口的状态；POST {name:"ball"|"spkui", on:bool} → 起/停。"""
+        body = body or {}
+        name = str(body.get("name") or "").strip().lower()
+        if name and name not in ("ball", "spkui"):
+            return {"ok": False, "err": "没有这个窗口：%s" % name}
+        if name and "on" in body:
+            self.api_cfg({name + "_on": bool(body.get("on"))})
+        return {"ok": True, "win": {nm: self.ui_state(nm) for nm in ("ball", "spkui")}}
+
+    def api_text_send(self, body):
+        r"""悬浮球里打一句中文：翻成 A 链目标语言，可选合成出声、可选发 VRChat 聊天框。
+
+        和 api_inject 的区别：那边是「闭环自测」（固定播测试音、必发 chatbox、走 out_dev），
+        这边是给人用的——参数全由调用方给，空文本直接拒，任何一个勾选关掉就真的不做。
+        翻译失败**不拿中文顶上去发聊天框**：对面看不懂中文，那等于往外发垃圾。
+        """
+        body = body or {}
+        text = re.sub(r"s+", " ", str(body.get("text") or "")).strip()
+        if not text:
+            return {"ok": False, "err": "空文本"}
+        text = text[:400]
+        dst_lang = str(body.get("lang") or self.cfg.get("dst_lang", "ja"))
+        if dst_lang not in ("ja", "zh", "en", "ko"):
+            dst_lang = "ja"
+        src_lang = "zh"
+        want_tts = bool(body.get("tts", True))
+        want_cb = bool(body.get("chatbox", True))
+        voice = body.get("voice") or self.cfg.get("voice")
+        t0 = time.time()
+        seg = self.bus.new_seg("A", src_lang=src_lang, dst_lang=dst_lang, engine="text")
+        self.bus.upd(seg, src=text, state="mt")
+        dst, mt_ms, err = text, 0.0, ""
+        if dst_lang != src_lang:
+            try:
+                tr = self.mt.translate(text, src=src_lang, dst=dst_lang,
+                                       card=self.cfg.get("card"),
+                                       custom=str(self.cfg.get("persona_custom") or ""))
+                dst = str(tr.get("text") or "").strip() or text
+                mt_ms = float(tr.get("ms") or 0.0)
+            except Exception as e:                      # noqa: BLE001
+                err = "翻译失败：%r" % (e,)
+                util.log("文字发送：" + err, "warn", "send")
+        if err:
+            self.bus.upd(seg, dst="", state="drop", note="翻译失败，没发出去")
+            return {"ok": False, "err": err, "src": text}
+        self.bus.upd(seg, dst=dst, mt_ms=round(mt_ms, 1),
+                     state="speak" if want_tts else "done")
+        tts_ms, audio_s, spoke = 0.0, 0.0, False
+        if want_tts and dst:
+            try:
+                pcm, first, _total = self.synth.synth(
+                    dst, voice, dst_lang, rate=(float(self.cfg.get("speed", 1.0)) or None))
+                tts_ms = float(first or 0.0)
+                if pcm:
+                    audio_s = len(pcm) / 2.0 / 24000.0
+                    if self.player is not None:
+                        self.player.push_tts_pcm(pcm, 24000)
+                    else:
+                        dev = int(self.cfg.get("out_dev", 19))
+                        threading.Thread(target=lambda: audio.play_pcm(
+                            dev, pcm, 24000, float(self.cfg.get("gain", 1.0)), log=util.log),
+                            name="textsend", daemon=True).start()
+                    spoke = True
+            except Exception as e:                      # noqa: BLE001
+                err = (err + "；" if err else "") + "合成失败：%r" % (e,)
+                util.log("文字发送合成失败：%r" % (e,), "warn", "send")
+        sent, cb_note = False, ""
+        if want_cb and dst:
+            if self.osc is None or not bool(self.cfg.get("chatbox_on", True)):
+                cb_note = "聊天框关着（控制台里把「聊天框」打开）"
+            else:
+                try:
+                    self.osc.send(dst)
+                    sent = True
+                except Exception as e:                  # noqa: BLE001
+                    cb_note = "聊天框发送失败：%r" % (e,)
+        ms = (time.time() - t0) * 1000.0
+        self.bus.upd(seg, state="done", tts_ms=round(tts_ms, 1), audio_ms=round(audio_s * 1000, 1),
+                     e2e_ms=round(ms, 1), note="文字发送")
+        util.log("文字发送：「%s」→「%s」（翻译 %.0f ms · 合成 %.0f ms · %s%s%s）"
+                 % (text[:24], dst[:24], mt_ms, tts_ms,
+                    "已出声" if spoke else "不出声", " · 已发聊天框" if sent else "",
+                    (" · " + cb_note) if cb_note else ""), "info", "send")
+        return {"ok": not err, "err": err, "src": text, "dst": dst, "lang": dst_lang,
+                "mt_ms": round(mt_ms, 1), "tts_ms": round(tts_ms, 1),
+                "audio_s": round(audio_s, 2), "spoke": spoke, "sent": sent,
+                "cb_note": cb_note, "ms": round(ms, 1)}
 
     # ================================================================ 试听
     # ================================================================ 音色

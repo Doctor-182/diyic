@@ -62,6 +62,7 @@ HIDDEN = [
     # 四个 Qt 子程序是按名字（--child NAME）动态导入的，静态分析看不到，必须显式点名，
     # 否则装完之后 hud/danmaku/overlay 会 ModuleNotFoundError，界面上只看到"浮窗起不来"。
     "vrdub.hud", "vrdub.danmaku", "vrdub.ocr_overlay", "vrdub.region_picker",
+    "vrdub.ball", "vrdub.spkui",
     "PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets",
     "onnxruntime", "onnxruntime.capi._pybind_state",
     "rapidocr_onnxruntime", "cv2", "yaml", "PIL", "PIL.Image",
