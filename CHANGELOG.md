@@ -25,7 +25,8 @@
 
 ### 功能（说话人分离）
 - **B 链字幕前标 1/2/3**：段定稿后拿同一段音频算 192 维声纹（ECAPA VoxCeleb，`models/spk/voxceleb.onnx`，80 MB），在线聚类分人，编号走原地换字补到同一行。模型内部做不了——Qwen3-ASR 的 GGUF `roles={ASR}`，`diarize_session()` 抛 `UnsupportedRole`，`diarize="on"` 输出与关掉逐字相同；transcribe.cpp 的 Sortformer 通道要 Openresearchtools 那个 fork 的 `stt.sortformer.*` 元数据，官方 GGUF 加载报 `ModelLoadError gguf load error (status 4)`。
-- 实测：空闲 77–122 ms/段（2 线程最快，4 线程反而慢），VRChat + qwen17 同跑时 385–445 ms；酒吧现场 60 段聚类，同簇余弦 p50 0.774 / 异簇 0.469，阈值 0.72 时 5 簇。`spk_th` / `spk_max` / `spk_secs` 三个旋钮热生效，A 链不挂分人。真值表 `tests/test_speaker.py` 15 项。
+- 实测：空闲 77–122 ms/段（2 线程最快，4 线程反而慢），VRChat + qwen17 同跑时 385–445 ms；酒吧现场 60 段聚类，同簇余弦 p50 0.774 / 异簇 0.469，阈值 0.72 时 5 簇。`spk_th` / `spk_max` / `spk_secs` 三个旋钮热生效，A 链不挂分人。
+- **名单存档**：`%LOCALAPPDATA%\VRDub\config\speakers.json`，192 维中心 + 编号 + 名字 + 段数 + 最后出现；重启不丢；起过名字的人簇满时不被淘汰，没起名且最久没出现的让位给新声音。上限从 6 提到 12（可到 24）。字幕前缀优先用名字，没名字才用编号。真值表 `tests/test_speaker.py` 29 项（含存档 round-trip）。
 
 ### 功能（音色与人设）
 - **音色克隆**：控制台里录 10–20 秒样本 → 试听 → 克隆，10–40 秒拿到自己的日语声音；样本自动转 24 kHz 单声道并归一化，近乎静音直接拒（不花冤枉钱）。端点自适应：套餐端点没有复刻模型（404 Model not exist.）就记住并转按量端点。音色表可存 24 个、可删（本地 + 云端尽力）。

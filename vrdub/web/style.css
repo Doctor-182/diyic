@@ -593,6 +593,13 @@ tr.st-drop{opacity:.55}
 .chd .sw i{width:13px;height:13px}
 .chd .sw[aria-pressed="true"] i{left:21px}
 .clang{display:flex;align-items:center;gap:5px;margin:5px 0 4px}
+.spkrow{display:flex;align-items:center;gap:4px;margin:2px 0 4px}
+.spkrow select{flex:1 1 0;min-width:0;padding:3px 20px 3px 7px;font-size:11px;background-position:calc(100% - 12px) 9px,calc(100% - 7px) 9px}
+.spkrow input[type=text]{flex:0 0 96px;width:96px;padding:3px 7px;font-size:11px}
+.spkrow input[type=text]::placeholder{color:#4a5a70}
+.spkrow .tiny{flex:0 0 auto;padding:3px 7px;font-size:10.5px;border-radius:6px;border:1px solid var(--bd);background:#101a26;color:#bcd0e6;cursor:pointer}
+.spkrow .tiny:hover{border-color:#2f6f86;color:#e9f3ff}
+.spkrow .tiny:active{transform:translateY(1px)}
 .clang select{flex:1 1 0;min-width:0;padding:3px 20px 3px 7px;font-size:11px;background-position:calc(100% - 12px) 9px,calc(100% - 7px) 9px}
 .clang .arrow{color:#42536a;font-size:11px;flex:0 0 auto}
 .clang .elab{font-size:10.5px;color:#8b9db4;flex:0 0 auto;letter-spacing:.02em}

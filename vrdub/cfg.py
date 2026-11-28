@@ -226,7 +226,7 @@ DEFAULTS = {
     # 分人（说话人分离）：只给 B 链看「这句话像不像同一个人在说」
     "spk_on": True,             # 开关；关掉 = 不算向量、不标号（省 100 ms CPU/段）
     "spk_th": 0.72,             # 判同一人的余弦门限（0.4–0.98）
-    "spk_max": 6,               # 最多认几个人（2–12），满了就都往最像的那个归
+    "spk_max": 12,              # 最多记几个人（2–24）；满了淘汰「没起名且最久没出现」的，起过名的永不淘汰
     "spk_secs": 1.5,            # 每段最多取前多久算向量（越长越准越慢）
     "spk_model": "",            # 模型路径，空 = 项目根 models/spk/voxceleb.onnx
     # OCR
@@ -480,7 +480,7 @@ def clamp_cfg(d: dict) -> dict:
     d["danmaku_max"] = max(1, min(10, int(d.get("danmaku_max", 6) or 6)))
     d["danmaku_top"] = max(0.0, min(0.5, float(d.get("danmaku_top", 0.12) or 0.0)))
     d["spk_th"] = max(0.40, min(0.98, float(d.get("spk_th", 0.72) or 0.72)))
-    d["spk_max"] = max(2, min(12, int(d.get("spk_max", 6) or 6)))
+    d["spk_max"] = max(2, min(24, int(d.get("spk_max", 12) or 12)))
     d["spk_secs"] = max(0.6, min(6.0, float(d.get("spk_secs", 1.5) or 1.5)))
     d["hud_rows"] = max(1, min(30, int(d.get("hud_rows", 8))))
     d["ocr_fps"] = max(1, min(12, int(d.get("ocr_fps", 6))))

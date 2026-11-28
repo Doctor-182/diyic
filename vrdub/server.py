@@ -96,6 +96,8 @@ class H(BaseHTTPRequestHandler):
                 return self._json(self.app.api_env({}))
             if path == "/api/voice_clone":
                 return self._json(self.app.api_voice_job({}))
+            if path == "/api/spk":
+                return self._json(self.app.api_spk({}))
             if path == "/api/events":
                 return self._sse()
             if path.startswith("/api/ocr/crop") and self.app.last_crop:
@@ -151,6 +153,8 @@ class H(BaseHTTPRequestHandler):
                 return self._json(self.app.api_voice_del(body))
             if path == "/api/dk_preview":
                 return self._json(self.app.api_dk_preview(body))
+            if path == "/api/spk":
+                return self._json(self.app.api_spk(body))
             if path == "/api/inject":
                 return self._json(self.app.api_inject(body))
             if path == "/api/mic":

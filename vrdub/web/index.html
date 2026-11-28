@@ -160,8 +160,15 @@
             </select>
           </div>
           <div class="clang">
-            <label class="chk"><input type="checkbox" data-cfg="spk_on" data-type="bool" checked><span>分人（字幕前标 1/2/3…）</span></label>
+            <label class="chk"><input type="checkbox" data-cfg="spk_on" data-type="bool" checked><span>分人（字幕前标 1/2/3…，起过名的标名字）</span></label>
             <span class="hint" id="spkStat">分人 —</span>
+          </div>
+          <div class="spkrow">
+            <select id="spkPick" title="选一位：起名字 / 删掉"><option value="">名单（还没人）</option></select>
+            <input id="spkName" type="text" maxlength="16" placeholder="名字，如 阿明">
+            <button id="spkSave" class="tiny">保存</button>
+            <button id="spkForget" class="tiny" title="忘掉这一位（声音再出现会重新开号）">删掉这位</button>
+            <button id="spkReset" class="tiny" title="把名单整个清空，重新数人">全清</button>
           </div>
           <div class="clive" id="liveB"><div class="ls">—</div><div class="ld">—</div></div>
         </div>

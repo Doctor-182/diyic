@@ -982,12 +982,12 @@ class App:
                 k = ev.get("k")
                 if k == "seg":
                     seg = ev.get("seg") or {}
-                    n = seg.get("spk")
-                    if n and seg.get("dst"):
-                        # 分人编号直接写进字幕首字：「2 你好啊」——原地换字时
-                        # 弹幕/浮窗走的是同 id 覆盖，所以编号是「补上去」的，不会新飘一条。
+                    lab = seg.get("spk_name") or (str(seg.get("spk")) if seg.get("spk") else "")
+                    if lab and seg.get("dst"):
+                        # 分人标签直接写进字幕首字：「阿明 你好啊」/「2 你好啊」——原地换字时
+                        # 弹幕/浮窗走的是同 id 覆盖，所以标签是「补上去」的，不会新飘一条。
                         seg = dict(seg)
-                        seg["dst"] = "%s %s" % (n, seg["dst"])
+                        seg["dst"] = "%s %s" % (lab, seg["dst"])
                     self.hud_send({"op": "seg", "seg": seg})
                     if not self.cfg.get("danmaku_src", True) and seg.get("src"):
                         seg = dict(seg)
@@ -1026,12 +1026,33 @@ class App:
         self._host_c = (time.time(), v)
         return v
 
-    def _spk_done(self, seg, n, sim):
-        """说话人算完了：给这一段补一个 1 起的编号（弹幕/浮窗同 id 原地换字）。"""
+    def _spk_done(self, seg, nid, sim, name=""):
+        """说话人算完了：补编号（+ 起过名字就带上名字）。弹幕/浮窗同 id 原地换字。"""
         try:
-            self.bus.upd(seg, spk=int(n) + 1, spk_sim=round(float(sim), 2))
+            kw = {"spk": int(nid), "spk_sim": round(float(sim), 2)}
+            if name:
+                kw["spk_name"] = str(name)
+            self.bus.upd(seg, **kw)
         except Exception:                       # noqa: BLE001
             pass
+
+    # ---------------------------------------------------------------- 分人名单
+    def api_spk(self, body):
+        """GET（空 body）→ 名单；POST {action: name|forget|reset, id, name}。"""
+        body = body or {}
+        act = str(body.get("action") or "").strip().lower()
+        if act == "name":
+            ok = self.spk.set_name(body.get("id"), body.get("name"))
+            return {"ok": ok, "spk": self.spk.stats(),
+                    "err": "" if ok else "没有这个编号"}
+        if act == "forget":
+            ok = self.spk.forget(body.get("id"))
+            return {"ok": ok, "spk": self.spk.stats(),
+                    "err": "" if ok else "没有这个编号"}
+        if act == "reset":
+            self.spk.reset()
+            return {"ok": True, "spk": self.spk.stats()}
+        return {"ok": True, "spk": self.spk.stats()}
 
     def state(self):
         c = cfgmod.clamp_cfg(self.cfg.all())

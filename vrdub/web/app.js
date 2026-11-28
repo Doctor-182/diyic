@@ -226,7 +226,7 @@
     { k: "active_ms",      label: "有效发声至少",            min: 40,   max: 1500, step: 10,  unit: "ms", dec: 0 },
     { k: "speech_ratio",   label: "占空比至少（挡咔哒）",     min: 0.02, max: 0.9, step: 0.01, unit: "", dec: 2 },
     { k: "spk_th",         label: "分人：同一人门限（余弦）",  min: 0.4,  max: 0.98, step: 0.01, unit: "", dec: 2 },
-    { k: "spk_max",        label: "分人：最多几个人",          min: 2,    max: 12,  step: 1,    unit: "人", dec: 0 },
+    { k: "spk_max",        label: "分人：最多记几个人",        min: 2,    max: 24,  step: 1,    unit: "人", dec: 0 },
     { k: "spk_secs",       label: "分人：每段取前几秒",        min: 0.6,  max: 6,   step: 0.1,  unit: "s", dec: 1 }
   ];
   var HUD_PARAMS = [
@@ -787,9 +787,24 @@
 
   /* ------------------------------ 延迟 / 丢段 ------------------------------ */
   function renderSpk() {
+    var k = st.spk || {};
+    var list = k.list || [];
+    // 名单下拉：起过名字的显示名字，没起名的显示「N 号（没起名）」
+    var sel = els.spkPick || document.getElementById("spkPick");
+    if (sel) {
+      var cur = sel.value;
+      if (!list.length) {
+        sel.innerHTML = '<option value="">名单（还没人）</option>';
+      } else {
+        sel.innerHTML = list.map(function (x) {
+          var nm = x.name ? x.name : (x.id + " 号（没起名）");
+          return '<option value="' + x.id + '">' + esc(nm) + " · " + (x.hits || 0) + " 段</option>";
+        }).join("");
+      }
+      if (cur && list.some(function (x) { return String(x.id) === cur; })) sel.value = cur;
+    }
     var el = document.getElementById("spkStat");
     if (!el) return;
-    var k = st.spk || {};
     if (!st.cfg || st.cfg.spk_on === false) {
       el.textContent = "分人：关着";
       el.title = "关掉就不算向量（省 ~100 ms CPU/段），字幕前不会标号";
@@ -797,11 +812,14 @@
     }
     if (k.err) { el.textContent = "分人：模型没就位"; el.title = k.err; return; }
     if (!k.ready) { el.textContent = "分人：待命"; el.title = "第一次有声音时才载入模型（84 MB）"; return; }
-    el.textContent = "分人：" + (k.clusters || 0) + " 人 · " + (k.seen || 0) + " 段 · " +
+    el.textContent = "分人：" + (k.clusters || 0) + " 人" +
+      (k.named ? "（" + k.named + " 个有名）" : "") + " · " + (k.seen || 0) + " 段 · " +
       fmtInt(k.ms_p50) + " ms";
     el.title = "簇人数：" + JSON.stringify(k.counts || []) +
-      "\n门限 " + k.th + " · 上限 " + k.max + " 人" +
-      "\n新声音 " + (k.new || 0) + " 次 · 失败 " + (k.fail || 0) + " · 丢弃 " + (k.dropped || 0);
+      "\n门限 " + k.th + " · 上限 " + k.max + " 人（满了淘汰没起名且最久没出现的）" +
+      "\n新声音 " + (k.new || 0) + " 次 · 淘汰 " + (k.evicted || 0) + " 次" +
+      " · 失败 " + (k.fail || 0) + " · 丢弃 " + (k.dropped || 0) +
+      (k.store ? ("\n名单存在 " + k.store) : "");
   }
 
   function renderMetrics() {
@@ -1584,6 +1602,8 @@
     els.personaHint = $("#personaHint"); els.personaOut = $("#personaOut");
     els.btnPersonaSave = $("#btnPersonaSave"); els.btnPersonaClear = $("#btnPersonaClear");
     els.ggufVocab = $("#ggufVocab"); els.btnVocabSave = $("#btnVocabSave"); els.vocabOut = $("#vocabOut");
+    els.spkPick = $("#spkPick"); els.spkName = $("#spkName");
+    els.spkSave = $("#spkSave"); els.spkForget = $("#spkForget"); els.spkReset = $("#spkReset");
     els.speed = $("#speed"); els.speedVal = $("#speedVal");
     els.engA = $("#engA"); els.engB = $("#engB"); els.engC = $("#engC");
     els.liveA = $("#liveA"); els.liveB = $("#liveB"); els.liveC = $("#liveC");
@@ -1766,6 +1786,54 @@
     // 专名表：打字不打扰，点「保存专名」才提交（后端 clamp 去重、单条 24 字、最多 8 条）
     if (els.ggufVocab) {
       els.ggufVocab.addEventListener("input", function () { st.vocabDirty = true; });
+    }
+    // 分人名单：选一位 → 起名字 / 删掉 / 全清（名单存在 %LOCALAPPDATA%\VRDub\config\speakers.json，
+    // 重启程序也还在；起过名字的人簇满时不会被淘汰）
+    function spkPost(payload) {
+      return apiPost("/api/spk", payload).then(function (j) {
+        if (j && j.spk) st.spk = j.spk;
+        renderSpk();
+        return j;
+      });
+    }
+    function spkPickId() {
+      var v = els.spkPick && els.spkPick.value;
+      return v ? parseInt(v, 10) : 0;
+    }
+    if (els.spkPick) {
+      els.spkPick.addEventListener("change", function () {
+        var id = spkPickId();
+        var row = (st.spk && (st.spk.list || []) || []).filter(function (x) { return x.id === id; })[0];
+        if (els.spkName) els.spkName.value = (row && row.name) || "";
+      });
+    }
+    if (els.spkSave) {
+      els.spkSave.addEventListener("click", function () {
+        var id = spkPickId();
+        if (!id) { log("warn", "先在左边选一位，再起名字"); return; }
+        var nm = (els.spkName && els.spkName.value || "").trim();
+        spkPost({ action: "name", id: id, name: nm }).then(function (j) {
+          if (!j || j.ok === false) { log("err", "起名失败：" + ((j && j.err) || "没有这个编号")); return; }
+          log("info", "分人：" + id + " 号 → " + (nm || "（清除名字）"));
+        });
+      });
+    }
+    if (els.spkForget) {
+      els.spkForget.addEventListener("click", function () {
+        var id = spkPickId();
+        if (!id) { log("warn", "先在左边选一位"); return; }
+        spkPost({ action: "forget", id: id }).then(function (j) {
+          if (!j || j.ok === false) { log("err", "删掉失败：" + ((j && j.err) || "没有这个编号")); return; }
+          log("info", "分人：忘掉 " + id + " 号（再出现会重新开号）");
+          if (els.spkName) els.spkName.value = "";
+        });
+      });
+    }
+    if (els.spkReset) {
+      els.spkReset.addEventListener("click", function () {
+        if (!window.confirm("把分人名单整个清空？（名字和声纹都会没，之后重新数人）")) return;
+        spkPost({ action: "reset" }).then(function () { log("info", "分人名单已清空"); });
+      });
     }
     if (els.btnVocabSave) {
       els.btnVocabSave.addEventListener("click", function () {
