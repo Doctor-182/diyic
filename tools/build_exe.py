@@ -48,6 +48,7 @@ MODEL_FILES = [
     "models/ocr/ch_PP-OCRv4_rec_infer.onnx",
     "models/ocr/config_ch.yaml",
     "models/ocr/config_ja.yaml",
+    "models/spk/voxceleb.onnx",
 ]
 
 # GGUF 档（tools/fetch_asr_models.py 下到 models/asr）——只在 --with-gguf 时进包

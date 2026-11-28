@@ -246,6 +246,19 @@ python tools\build_exe.py --with-gguf         :: 要带就显式加（安装包�
 
 CUDA 版的 `ggml-cuda.dll` 用裸名 `LoadLibraryA("cublas64_12.dll")` 找库，**只认 PATH、不认自己所在目录**，所以本机没装 CUDA Toolkit 时必须把 `cublas64_12.dll / cublasLt64_12.dll / cudart64_12.dll` 放进 `transcribe_cpp_native_cu12\_native` 并由 `asr_gguf._env_setup()` 把该目录前置进 PATH（`fetch_asr_models.py --runtime` 已经这么装）。缺了会报 `BackendError: backend error (status 8)`。
 
+### 分人：字幕前标 1/2/3（B 链）
+
+酒吧、KTV 这种多人在场的场景，光有译文没用——得知道这句是谁说的。做法是**段级声纹 + 在线聚类**，不依赖模型内部能力（Qwen3-ASR 的 GGUF 只有 ASR 一个角色，`diarize_session()` 直接抛 `UnsupportedRole`；transcribe.cpp 的 Sortformer 通道要 Openresearchtools 那个 fork 的元数据键，官方 GGUF 装不进去）。
+
+- 模型：`models/spk/voxceleb.onnx`（ECAPA-TDNN VoxCeleb，80 MB，前处理折进图，输入就是原始 16 kHz 波形，输出 192 维向量）。
+- 时机：VAD 已经切好段，段定稿后把**同一段音频**丢进独立线程算向量（2 线程 ONNX 最快；实测空闲 77–122 ms/段，VRChat + qwen17 同跑时 385–445 ms）。字幕照常先出，编号等到算完再补——弹幕/浮窗是**同一行原地换字**，不会新飘一条。
+- 判定：余弦 ≥ `spk_th`（默认 0.72）归最近的簇，否则开新簇；簇数满了归最像的那个；簇中心 EMA 0.3 慢慢跟。
+- 面板：「B 链」卡里 `data-cfg="spk_on"` 开关 + 一行状态（`分人：3 人 · 42 段 · 101 ms`），「延迟阀 / 窗口」卡里有 `spk_th`（0.40–0.98）/ `spk_max`（2–12）/ `spk_secs`（0.6–6）三个旋钮，全部热生效。
+- 调参口径：同一个人被拆成两个号 → `spk_th` 往 0.65 降；两个人并成一个号 → 往 0.78 提；人比 `spk_max` 多 → 提到 8–12；嫌吃 CPU → `spk_secs` 降到 1.0 或关掉开关。
+- A 链不挂分人：麦克风里永远是你自己。
+
+真值表 `tests/test_speaker.py` 15 项：prepare 的 int16/立体声/全零、太短与静音返回 None、同人合并、异人开新簇、门限 0.95 不合并、簇满归最像、开关关掉与 0.3 s 段直接拒、reset 清空。
+
 ### 精修（refine）：定稿后后台再听一遍
 
 快路（本地 SenseVoice）先把字幕顶上去，**定稿之后**后台再听一遍同一段音频，改了就把字幕刷掉——B 链连中文译文一起刷。开关在控制台 B 卡第二条「识别」下拉（`asr_refine`）：

@@ -36,6 +36,7 @@ from . import paths as pathmod
 from . import child as childmod
 from . import asr as asr_mod
 from . import asr_gguf
+from . import speaker as speakermod
 from .asr import Transcriber
 from .vad import Segmenter
 
@@ -83,10 +84,13 @@ class App:
         self._proc_next = 0.0        # 下次尝试连 VRChat 的时间
         self.seg_a = None
         self.seg_b = None
+        # 分人（说话人分离）：只挂 B 链。模型不在/算失败都不影响字幕，编号只是晚到。
+        self.spk = speakermod.Speaker(self.cfg, log=util.log, on_result=self._spk_done)
         self.chain_a = chains.StreamChain("A", True, self.cfg, self.bus, self.asr, self.mt,
                                          self.synth, player=None, src_key="mic")
         self.chain_b = chains.StreamChain("B", False, self.cfg, self.bus, self.asr, self.mt,
-                                         self.synth, player=None, src_key="loop")
+                                         self.synth, player=None, src_key="loop",
+                                         spk=self.spk)
         # VRChat chatbox：只给 A 链用（B 链译文绝不外发）
         self.osc = oscmod.OscChatbox(self.cfg, util.log)
         self.chain_a.osc = self.osc
@@ -978,6 +982,12 @@ class App:
                 k = ev.get("k")
                 if k == "seg":
                     seg = ev.get("seg") or {}
+                    n = seg.get("spk")
+                    if n and seg.get("dst"):
+                        # 分人编号直接写进字幕首字：「2 你好啊」——原地换字时
+                        # 弹幕/浮窗走的是同 id 覆盖，所以编号是「补上去」的，不会新飘一条。
+                        seg = dict(seg)
+                        seg["dst"] = "%s %s" % (n, seg["dst"])
                     self.hud_send({"op": "seg", "seg": seg})
                     if not self.cfg.get("danmaku_src", True) and seg.get("src"):
                         seg = dict(seg)
@@ -1016,6 +1026,13 @@ class App:
         self._host_c = (time.time(), v)
         return v
 
+    def _spk_done(self, seg, n, sim):
+        """说话人算完了：给这一段补一个 1 起的编号（弹幕/浮窗同 id 原地换字）。"""
+        try:
+            self.bus.upd(seg, spk=int(n) + 1, spk_sim=round(float(sim), 2))
+        except Exception:                       # noqa: BLE001
+            pass
+
     def state(self):
         c = cfgmod.clamp_cfg(self.cfg.all())
         segs = self.bus.segs
@@ -1028,6 +1045,8 @@ class App:
             # 人设卡（预设 + 自定义口吻）。前端只读这里，不写死三张卡的名字。
             "persona": personamod.describe(),
             "metrics": {k: metrics.summarize(segs, k) for k in ("A", "B", "C")},
+            # 分人：几个簇、每簇几段、耗时（界面上的「分人」行读这个）
+            "spk": self.spk.stats(),
             "hud": {"on": bool(c.get("hud_on")), "pid": getattr(self.hud, "pid", 0) or 0,
                     "alive": bool(self.hud is not None and self.hud.poll() is None)},
             "danmaku": {"on": bool(c.get("danmaku")),

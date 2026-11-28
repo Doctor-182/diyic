@@ -224,7 +224,10 @@
     { k: "valley_win",     label: "谷切回看窗口",            min: 0.8,  max: 8,   step: 0.1,  unit: "s", dec: 1 },
     { k: "valley_gap",     label: "谷要低多少 dB 才算谷",     min: 2,    max: 20,  step: 0.5,  unit: "dB", dec: 1 },
     { k: "active_ms",      label: "有效发声至少",            min: 40,   max: 1500, step: 10,  unit: "ms", dec: 0 },
-    { k: "speech_ratio",   label: "占空比至少（挡咔哒）",     min: 0.02, max: 0.9, step: 0.01, unit: "", dec: 2 }
+    { k: "speech_ratio",   label: "占空比至少（挡咔哒）",     min: 0.02, max: 0.9, step: 0.01, unit: "", dec: 2 },
+    { k: "spk_th",         label: "分人：同一人门限（余弦）",  min: 0.4,  max: 0.98, step: 0.01, unit: "", dec: 2 },
+    { k: "spk_max",        label: "分人：最多几个人",          min: 2,    max: 12,  step: 1,    unit: "人", dec: 0 },
+    { k: "spk_secs",       label: "分人：每段取前几秒",        min: 0.6,  max: 6,   step: 0.1,  unit: "s", dec: 1 }
   ];
   var HUD_PARAMS = [
     { k: "hud_alpha", label: "不透明度", min: 10, max: 100, step: 1, unit: "%", dec: 0 },
@@ -783,6 +786,24 @@
   }
 
   /* ------------------------------ 延迟 / 丢段 ------------------------------ */
+  function renderSpk() {
+    var el = document.getElementById("spkStat");
+    if (!el) return;
+    var k = st.spk || {};
+    if (!st.cfg || st.cfg.spk_on === false) {
+      el.textContent = "分人：关着";
+      el.title = "关掉就不算向量（省 ~100 ms CPU/段），字幕前不会标号";
+      return;
+    }
+    if (k.err) { el.textContent = "分人：模型没就位"; el.title = k.err; return; }
+    if (!k.ready) { el.textContent = "分人：待命"; el.title = "第一次有声音时才载入模型（84 MB）"; return; }
+    el.textContent = "分人：" + (k.clusters || 0) + " 人 · " + (k.seen || 0) + " 段 · " +
+      fmtInt(k.ms_p50) + " ms";
+    el.title = "簇人数：" + JSON.stringify(k.counts || []) +
+      "\n门限 " + k.th + " · 上限 " + k.max + " 人" +
+      "\n新声音 " + (k.new || 0) + " 次 · 失败 " + (k.fail || 0) + " · 丢弃 " + (k.dropped || 0);
+  }
+
   function renderMetrics() {
     var A = st.metrics.A || {}, B = st.metrics.B || {}, C = st.metrics.C || {};
     var p50 = A.e2e_p50, p90 = A.e2e_p90;
@@ -1152,6 +1173,7 @@
     if (s.metrics) st.metrics = s.metrics;
     if (s.hud) st.hud = s.hud;
     if (s.danmaku) st.danmaku = s.danmaku;
+    if (s.spk) st.spk = s.spk;
     if (!("danmaku" in st.cfg)) st.cfg.danmaku = false;
     if (s.mic) st.mic = Object.assign({}, st.mic, s.mic);
     if (s.ocr) st.ocr = Object.assign({}, st.ocr, s.ocr);
@@ -1165,6 +1187,7 @@
     renderDevices();
     syncControls();
     renderMetrics();
+    renderSpk();
     renderHudInfo();
     renderSys();
     renderAsr();

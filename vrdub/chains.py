@@ -157,7 +157,7 @@ class StreamChain:
     """A / B 共用：一边收音频一边识别翻译，出不出声由 speak 决定。"""
 
     def __init__(self, name, speak, cfg, bus, asr, mt, tts, player=None, log=util.log,
-                 src_key="mic"):
+                 src_key="mic", spk=None):
         self.name = name
         self.speak = speak
         self.cfg = cfg
@@ -168,6 +168,7 @@ class StreamChain:
         self.player = player
         self.log = log
         self.src_key = src_key
+        self.spk = spk            # 说话人分离（只有 B 链挂；A 链永远是我自己）
         self._in_q = queue.Queue(maxsize=64)
         self._speak_q = queue.Queue()
         self._thr = None
@@ -512,6 +513,10 @@ class StreamChain:
             self.bus.upd(bseg, src=full, state="asr",
                          asr_ms=round(ms, 1), engine=engine, vad_ms=vad_ms,
                          lvl=round(float(st.get("lvl", ev.get("lvl", -99.0))), 1))
+            # 分人：丢进说话人队列，算完再往这一段补 spk 编号（120 ms 上下，不占识别线程）。
+            # A 链不挂：A 链的音频永远是麦克风里的我自己，标号没有信息量。
+            if self.spk is not None and self.src_key != "mic":
+                self.spk.submit(bseg, audio)
         if not full:
             # 整段一个字都没有：不往下走（否则会以空 src/dst 的 done 收尾，静默失败）。
             self._empty_n = getattr(self, "_empty_n", 0) + 1

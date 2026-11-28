@@ -23,6 +23,10 @@
 - **专名表**（`asr_gguf_vocab`，控制台「识别参数」卡最下面那行）：把游戏名/人名喂给 GGUF 档当 vocabulary，压住 1.7B 最要命的**专名替换幻觉**（`ロックマン`→`動画`、`グラセフ`→`暮らす`、`チートコード`→`シビオット行動`、`スタミナ`→`サナミ`——语法通顺、语义全偏）。实测 `prompt` 会被抄进正文、`pnc/itn/diarize` 静默无效，**vocabulary 是唯一有效且不污染正文的偏置**。
 - 规矩：只放词不放整句、2–6 条（塞不相关词会把正常句带跑）、只对 qwen17/qwen06 生效；单条 ≤24 字、最多 8 条，保存热生效。模型不认这个参数时自动退回不带词表那次重跑，不会丢段。真值表 `tests/test_gguf_vocab.py` 6 组 10 项。
 
+### 功能（说话人分离）
+- **B 链字幕前标 1/2/3**：段定稿后拿同一段音频算 192 维声纹（ECAPA VoxCeleb，`models/spk/voxceleb.onnx`，80 MB），在线聚类分人，编号走原地换字补到同一行。模型内部做不了——Qwen3-ASR 的 GGUF `roles={ASR}`，`diarize_session()` 抛 `UnsupportedRole`，`diarize="on"` 输出与关掉逐字相同；transcribe.cpp 的 Sortformer 通道要 Openresearchtools 那个 fork 的 `stt.sortformer.*` 元数据，官方 GGUF 加载报 `ModelLoadError gguf load error (status 4)`。
+- 实测：空闲 77–122 ms/段（2 线程最快，4 线程反而慢），VRChat + qwen17 同跑时 385–445 ms；酒吧现场 60 段聚类，同簇余弦 p50 0.774 / 异簇 0.469，阈值 0.72 时 5 簇。`spk_th` / `spk_max` / `spk_secs` 三个旋钮热生效，A 链不挂分人。真值表 `tests/test_speaker.py` 15 项。
+
 ### 功能（音色与人设）
 - **音色克隆**：控制台里录 10–20 秒样本 → 试听 → 克隆，10–40 秒拿到自己的日语声音；样本自动转 24 kHz 单声道并归一化，近乎静音直接拒（不花冤枉钱）。端点自适应：套餐端点没有复刻模型（404 Model not exist.）就记住并转按量端点。音色表可存 24 个、可删（本地 + 云端尽力）。
 - **人设（口吻）**：三张内置卡 + 最多 1200 字自定义口吻，热生效；硬约束（全译 / 不增 / 不减 / 不省略 / 人称照原文 / 只出译文 / 禁标签）永远追加在末尾，且只作用于 A 链。

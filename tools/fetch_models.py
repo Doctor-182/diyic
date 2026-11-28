@@ -11,6 +11,7 @@
     models/ocr/japan_dict.txt            17 KB
     models/ocr/ch_PP-OCRv4_det_infer.onnx / ch_PP-OCRv4_rec_infer.onnx  4.7 + 10.4 MB
     models/ocr/config_ch.yaml / config_ja.yaml
+    models/spk/voxceleb.onnx           80 MB   说话人分离（ECAPA，B 链字幕前标 1/2/3…）
 备选（不装也能跑，装了可以用 anime-whisper 引擎对比）：
     models/anime-whisper-ct2-int8/model.bin   732 MB
 
@@ -43,6 +44,7 @@ REQUIRED = [
     ("ocr/japan_dict.txt", "日文字典"),
     ("ocr/ch_PP-OCRv4_det_infer.onnx", "文字检测"),
     ("ocr/ch_PP-OCRv4_rec_infer.onnx", "中文识别"),
+    ("spk/voxceleb.onnx", "说话人分离（ECAPA 80 MB，缺了 B 链就不标 1/2/3）"),
 ]
 OPTIONAL = [("anime-whisper-ct2-int8/model.bin", "备用识别引擎（732 MB，不装可用）")]
 

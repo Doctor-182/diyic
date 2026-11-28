@@ -223,6 +223,12 @@ DEFAULTS = {
     "danmaku_alpha": 100,       # 弹幕不透明度 %（40–100）
     "danmaku_style": "card",    # card 卡片 / plain 纯描边 / bar 只留色条 / neon 发光
     "danmaku_src": True,        # 副行显示原文
+    # 分人（说话人分离）：只给 B 链看「这句话像不像同一个人在说」
+    "spk_on": True,             # 开关；关掉 = 不算向量、不标号（省 100 ms CPU/段）
+    "spk_th": 0.72,             # 判同一人的余弦门限（0.4–0.98）
+    "spk_max": 6,               # 最多认几个人（2–12），满了就都往最像的那个归
+    "spk_secs": 1.5,            # 每段最多取前多久算向量（越长越准越慢）
+    "spk_model": "",            # 模型路径，空 = 项目根 models/spk/voxceleb.onnx
     # OCR
     "ocr_region": [0, 0, 0, 0],
     "ocr_fps": 6,
@@ -473,6 +479,9 @@ def clamp_cfg(d: dict) -> dict:
     d["danmaku_lanes"] = max(2, min(6, int(d.get("danmaku_lanes", 4) or 4)))
     d["danmaku_max"] = max(1, min(10, int(d.get("danmaku_max", 6) or 6)))
     d["danmaku_top"] = max(0.0, min(0.5, float(d.get("danmaku_top", 0.12) or 0.0)))
+    d["spk_th"] = max(0.40, min(0.98, float(d.get("spk_th", 0.72) or 0.72)))
+    d["spk_max"] = max(2, min(12, int(d.get("spk_max", 6) or 6)))
+    d["spk_secs"] = max(0.6, min(6.0, float(d.get("spk_secs", 1.5) or 1.5)))
     d["hud_rows"] = max(1, min(30, int(d.get("hud_rows", 8))))
     d["ocr_fps"] = max(1, min(12, int(d.get("ocr_fps", 6))))
     d["asr_spec_gap"] = max(0.4, min(8.0, float(d.get("asr_spec_gap", 1.5))))
