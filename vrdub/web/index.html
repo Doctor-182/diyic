@@ -115,6 +115,7 @@
               <option value="hybrid">本地优先（低延迟）</option>
               <option value="cloud">云端（更准）</option>
               <option value="local">纯本地（离线）</option>
+              <option value="sv">SenseVoice（本地·0 显存）</option>
               <option value="qwen17">Qwen3-1.7B（GGUF·显卡）</option>
               <option value="qwen06">Qwen3-0.6B（GGUF·轻）</option>
               <option value="fun">Fun-ASR-Nano（GGUF）</option>
@@ -144,10 +145,11 @@
           </div>
           <div class="clang">
             <span class="elab">识别</span>
-            <select data-cfg="asr_engine_b" title="B 链识别引擎：本地优先=143-351 ms 先出字幕（推荐），云端=准但抖动 0.3-13 s；qwen17=真语料最准（自带标点与语种判定，显存 1.4 GB）">
+            <select data-cfg="asr_engine_b" title="B 链识别引擎：本地优先=143-351 ms 先出字幕（推荐），云端=准但抖动 0.3-13 s；sv=只用 SenseVoice（0 显存）；qwen17=真语料最准（自带标点与语种判定，显存 1.4 GB+0.4 运行库）。装不下的档会被拒绝并说明原因，不会把旧的先卸掉">
               <option value="cloud">云端（更准，抖动大）</option>
               <option value="hybrid">本地优先（低延迟，推荐）</option>
               <option value="local">纯本地（离线）</option>
+              <option value="sv">SenseVoice（本地·0 显存）</option>
               <option value="qwen17">Qwen3-1.7B（GGUF·显卡）</option>
               <option value="qwen06">Qwen3-0.6B（GGUF·轻）</option>
               <option value="fun">Fun-ASR-Nano（GGUF）</option>
@@ -435,6 +437,7 @@
               <option value="hybrid">本地 + 云端校正</option>
               <option value="local">只用本地</option>
               <option value="cloud">只用云端</option>
+              <option value="sv">SenseVoice（本地·0 显存）</option>
               <option value="qwen17">Qwen3-1.7B（GGUF·显卡）</option>
               <option value="qwen06">Qwen3-0.6B（GGUF·轻）</option>
               <option value="fun">Fun-ASR-Nano（GGUF）</option>
@@ -541,6 +544,7 @@
           <div><span>浮窗</span><b id="sysHud">—</b></div>
           <div><span>弹幕</span><b id="sysDanmaku">—</b></div>
           <div><span>麦克风</span><b id="sysMic">—</b></div>
+          <div><span>显存</span><b id="sysVram">—</b></div>
           <div><span>GGUF 档</span><b id="sysGguf">—</b></div>
         </div>
       </section>

@@ -37,6 +37,7 @@ from . import paths as pathmod
 from . import child as childmod
 from . import asr as asr_mod
 from . import asr_gguf
+from . import vram as vrammod
 from . import speaker as speakermod
 from .asr import Transcriber
 from .vad import Segmenter
@@ -141,6 +142,7 @@ class App:
         if not self.cfg.key:
             util.log("没有 DASHSCOPE_TOKENPLAN_KEY（.env.local），云端功能会全挂", "err", "boot")
         threading.Thread(target=self.asr.warm, name="warm", daemon=True).start()
+        self._warm_gguf()                   # 选了 GGUF 档就后台先载入，别等第一句话
         self.chain_a.start()
         self.chain_b.start()
         if self.cfg.get("chatbox_on", True):
@@ -1207,6 +1209,7 @@ class App:
                 "refine": str(c.get("asr_refine", "auto")),
                 "ja": (self.asr.ja.stat() if self.asr.ja is not None
                        else {"device": "-", "note": "未加载"}),
+                "vram": vrammod.probe(),
                 "gguf": asr_gguf.RES.info(),
                 "gguf_models": asr_gguf.catalog(c)}
         lap("asr")
@@ -1328,12 +1331,36 @@ class App:
                 "probe": "ok" if probe is True else ("fail" if probe is False else "未测")}
 
     # ================================================================ 改配置
+    def _gguf_fit_error(self, patch):
+        """切到 GGUF 档之前先算显存：装不下就返回一段人话，装得下返回空串。"""
+        pairs = []
+        if "asr_engine" in patch:
+            pairs.append(("asr_engine", patch.get("asr_engine")))
+        for k in ("asr_engine_a", "asr_engine_b"):
+            if k in patch:
+                pairs.append((k, patch.get(k)))
+        for k, eid in pairs:
+            eid = str(eid or "")
+            if eid not in asr_gguf.ENGINES:
+                continue
+            ok, why = asr_gguf.fits(eid)
+            if not ok:
+                return "%s → %s：%s" % (k, eid, why)
+        return ""
+
     def api_cfg(self, patch):
         patch = {k: v for k, v in (patch or {}).items() if k in cfgmod.DEFAULTS}
         # 控制台那张「识别方式（默认）」是两条链一起改的快捷方式
         if "asr_engine" in patch:
             for k in ("asr_engine_a", "asr_engine_b"):
                 patch.setdefault(k, patch["asr_engine"])
+        # 显存看门：装不下的档不许切（切了不是慢，是 CUDA 分配失败 + VRChat 一起掉帧，
+        # 而且旧模型已经被卸掉，两条链会一起哑）。拒绝时把当前配置原样发回去，前端好回滚。
+        bad = self._gguf_fit_error(patch)
+        if bad:
+            util.log("拒绝切档：" + bad, "warn", "cfg")
+            return {"ok": False, "err": bad, "cfg": cfgmod.clamp_cfg(self.cfg.all()),
+                    "vram": vrammod.probe()}
         changed = self.cfg.update(patch)
         if changed:
             cl = cfgmod.clamp_cfg(self.cfg.all())
@@ -1417,6 +1444,18 @@ class App:
                 except Exception:                   # noqa: BLE001
                     pass
             util.log(f"翻译已停：撤掉 {n} 条未播译文（识别继续，只出原文）", "info", "cfg")
+
+    def _warm_gguf(self):
+        r"""启动就预热 GGUF 档。
+
+        第一次载入 1.7B 要 52 s（读 1.4 GB 权重 + 建 CUDA 上下文），这一下要是等
+        用户开口才发生，第一句话就会卡住半分钟。所以启动后立刻在后台载入，
+        显存不够时看门会拒绝并写日志——那是启动时的正常结论，不是错误。
+        """
+        ea = str(self.cfg.get("asr_engine_a") or "")
+        eb = str(self.cfg.get("asr_engine_b") or "")
+        if ea in asr_gguf.ENGINES or eb in asr_gguf.ENGINES:
+            self._apply_gguf(set())
 
     def _apply_gguf(self, keys):
         r"""GGUF 档的进与出：同一时刻只驻留一个模型。

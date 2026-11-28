@@ -1218,7 +1218,7 @@
   }
 
   /* 识别引擎徽标：A/B 各一格（本地/云端），title 里带精修模型现状 */
-  var ASR_TXT = { hybrid: "本地+云", local: "本地", cloud: "云端",
+  var ASR_TXT = { hybrid: "本地+云", local: "本地", cloud: "云端", sv: "SV 本地",
     qwen17: "Qwen1.7B", qwen06: "Qwen0.6B", fun: "FunASR" };
   var GGUF_IDS = { qwen17: 1, qwen06: 1, fun: 1 };
   /* GGUF 档的驻留说明：同一时刻只有一个模型在显存里，徽标上直接写清「是不是它、占多少」
@@ -1251,6 +1251,23 @@
   function renderSys() {
     setTx(els.sysPid, st.pid ? String(st.pid) : "–");
     setTx(els.sysVer, st.ver || "–");
+    /* 显存：整机读数 + 我们自己的 GGUF 占了多少。它是唯一会让「切档」被拒绝的资源，
+       所以必须常驻可见，而不是埋在日志里。 */
+    if (els.sysVram) {
+      var v = (st.asr || {}).vram || {};
+      if (v.ok) {
+        var pct = v.total_mb ? Math.round(v.used_mb * 100 / v.total_mb) : 0;
+        setTx(els.sysVram, (v.used_mb / 1024).toFixed(1) + " / " + (v.total_mb / 1024).toFixed(1) +
+          " GB（空 " + (v.free_mb / 1024).toFixed(2) + " GB）");
+        els.sysVram.title = "整机显存占用 " + pct + "%（nvidia-smi）\n" +
+          "GGUF 档驻留：" + (((st.asr || {}).gguf || {}).name || "无") +
+          "；装不下的档会被拒绝切（留 256 MiB 余量）";
+      } else {
+        setTx(els.sysVram, "读数不可用");
+        els.sysVram.title = String(v.err || "nvidia-smi 查不到：没有 N 卡或驱动没装") +
+          "\n此时切档不做显存预检，照装。";
+      }
+    }
     /* GGUF 档：显存里现在是谁、吃了多少；没驻留就报「装了哪几个」。
        换档有 2–4 s 载入，用户看见「未驻留」就知道下一句会慢一点。 */
     if (els.sysGguf) {
@@ -1260,13 +1277,32 @@
         .map(function (m) { return ASR_TXT[m.id] || m.id; });
       var txt = g.key
         ? ((ASR_TXT[g.key] || g.key) + " 驻留 " + Math.round(g.vram_mb || 0) + " MiB")
-        : ("未驻留 · 已装 " + (have.length ? have.join(" / ") : "无"));
+        : (g.busy ? "载入中…（首次要编译 kernel，几十秒）"
+          : ("未驻留 · 已装 " + (have.length ? have.join(" / ") : "无")));
       setTx(els.sysGguf, txt);
       els.sysGguf.title = cat.map(function (m) {
         return m.name + (m.present ? " · " + m.mb + " MB" : " · 未下载") +
-          " · 显存约 " + m.vram_mb + " MiB · " + m.backend;
+          " · 显存约 " + m.vram_mb + " MiB（含运行库共 " + (m.need_mb || m.vram_mb) + "）" +
+          (m.fits ? " · 现在装得下" : " · 现在装不下：" + (m.why || "")) +
+          " · " + m.backend;
       }).join("\n") || "没有可选档";
+      annotateAsrOptions(cat);
     }
+  }
+  /* 把「现在装不下」直接标在下拉选项上。后端还会再拦一次（api_cfg 里 _gguf_fit_error），
+     这里只是让人别去点了才被拒。选中项不加标记——它可能正驻留着，或者读数刚好抖动。 */
+  function annotateAsrOptions(cat) {
+    var fits = {};
+    (cat || []).forEach(function (m) { fits[m.id] = !!m.fits; });
+    $$("select[data-cfg^='asr_engine']").forEach(function (sel) {
+      Array.prototype.forEach.call(sel.options, function (op) {
+        var base = op.getAttribute("data-base");
+        if (base === null) { base = op.textContent; op.setAttribute("data-base", base); }
+        var bad = (op.value in fits) && !fits[op.value] && !op.selected;
+        var want = bad ? (base + " · 显存不够") : base;
+        if (op.textContent !== want) op.textContent = want;
+      });
+    });
   }
   function renderHudInfo() {
     var h = st.hud || {};
@@ -1487,6 +1523,12 @@
     var body = {};
     body[k] = v;
     apiPost("/api/cfg", body).then(function (j) {
+      if (j && j.ok === false) {
+        // 后端拒绝（典型：显存装不下这个档）。回滚控件，把原因原样打给人看。
+        if (j.cfg) { st.cfg = Object.assign({}, st.cfg, j.cfg); syncControls(); }
+        log("err", "没改成 " + k + "：" + (j.err || "后端拒绝"));
+        return;
+      }
       if (j && j.cfg) { st.cfg = Object.assign({}, st.cfg, j.cfg); syncControls(); }
       log("info", "设置 " + k + " = " + JSON.stringify(v));
     });
@@ -1620,6 +1662,7 @@
     els.sysDanmaku = $("#sysDanmaku"); els.danmHint = $("#danmHint");
     els.sysMic = $("#sysMic");
     els.sysGguf = $("#sysGguf");
+    els.sysVram = $("#sysVram");
 
     buildParams($("#params"), MAIN_PARAMS);
     buildParams($("#latparams"), LAT_PARAMS);

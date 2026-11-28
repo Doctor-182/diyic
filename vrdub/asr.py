@@ -22,6 +22,7 @@ from . import util
 from .asr_whisper import WhisperASR
 from . import asr_engines
 from . import asr_gguf
+from . import vram as vrammod
 from . import paths as _paths
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -473,6 +474,16 @@ class Transcriber:
         """
         e = e or self.engine()
         t0 = time.time()
+        if e in ("sv", "sensevoice"):
+            # 显式选「本地 SenseVoice」档：不碰显存、不碰网络，CPU 一条路走到底。
+            # 与 local/hybrid 的区别是**不做选档、不兜云端**——用户选它就是要它，
+            # 出不来就报空（上层按「整段没识别出字」处理并留 note），别偷偷换模型。
+            if not self.local.ready():
+                self.log("选了本地 SenseVoice 但它没载入：%s" % (self.local.note or "权重缺失"),
+                         "warn", "asr")
+                return "", "sv", round((time.time() - t0) * 1000.0, 1)
+            lt = util.clean_text(self.local.transcribe(pcm16, lang or "auto") or "")
+            return lt, "sensevoice", round((time.time() - t0) * 1000.0, 1)
         if e in asr_gguf.ENGINES:
             # GGUF 档（qwen17 / qwen06 / fun）：一次只驻留一个模型，换档由 asr_gguf 负责卸载旧的。
             # 语种：qwen 的输出协议是「先写一句 language X<asr_text> 再写正文」，
@@ -638,6 +649,7 @@ class Transcriber:
 
     def stat(self) -> dict:
         d = {"refine": str(self.cfg.get("asr_refine", "auto")),
+             "vram": vrammod.probe(),
              "gguf": asr_gguf.RES.info(),
              "gguf_models": asr_gguf.catalog(self.cfg)}
         if self.ja is not None:

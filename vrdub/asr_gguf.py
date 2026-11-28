@@ -25,18 +25,19 @@ import numpy as np
 
 from . import paths as _paths
 from . import util
+from . import vram
 
 ROOT = _paths.ROOT
 
 ENGINES = {
     "qwen17": {"name": "Qwen3-ASR-1.7B-Q5", "file": "Qwen3-ASR-1.7B-Q5_K_M.gguf",
-               "backend": "cuda", "vram_mb": 1441, "detect": True,
+               "backend": "cuda", "vram_mb": 1441, "overhead_mb": 420, "detect": True,
                "note": "带标点、自报语种；真日语实录里唯一整句全对的档"},
     "qwen06": {"name": "Qwen3-ASR-0.6B-Q8", "file": "Qwen3-ASR-0.6B-Q8_0.gguf",
-               "backend": "cuda", "vram_mb": 805, "detect": True,
+               "backend": "cuda", "vram_mb": 805, "overhead_mb": 420, "detect": True,
                "note": "1.7B 的一半显存，质量掉一档；缺显存时用"},
     "fun": {"name": "Fun-ASR-Nano-Q8", "file": "Fun-ASR-Nano-2512-Q8_0.gguf",
-            "backend": "cuda", "vram_mb": 844, "detect": False,
+            "backend": "cuda", "vram_mb": 844, "overhead_mb": 420, "detect": False,
             "note": "最快但不出标点、只有 3 个语种，日语偶尔听成中文"},
 }
 
@@ -62,6 +63,50 @@ def path_of(eid, cfg=None) -> str:
 def available(eid, cfg=None) -> bool:
     p = path_of(eid, cfg)
     return bool(eid in ENGINES and os.path.isfile(p))
+
+
+# ---------------------------------------------------------------- 显存看门
+# 为什么要看门：换到一个装不下的档，后果不是「慢一点」，是 CUDA 分配失败 +
+# VRChat 一起掉帧/闪退。而换档失败还会把旧模型先卸掉（_drop 在载入之前），
+# 于是两条链一起哑掉。所以在真正碰模型之前先算清楚，装不下就不动。
+# 420 MiB 是实测出来的：qwen17 权重 1441 MiB 驻留时，进程显存 1836 MiB
+# （cublas Lt 工作区 + CUDA context）。宁可多留，不要刚好。
+
+def need_mb(eid) -> int:
+    """这个档真正要占多少显存：权重 + 运行库/上下文。"""
+    e = ENGINES.get(eid) or {}
+    return int(e.get("vram_mb") or 0) + int(e.get("overhead_mb") or 0)
+
+
+def free_after_switch(eid) -> int:
+    """切到 eid 之后能用的显存：现在空闲 + 换档会卸掉的那一份。读不到返回 -1。"""
+    free = vram.free_mb()
+    if free < 0:
+        return -1
+    cur = RES.key
+    if cur and cur != eid and cur in ENGINES:
+        free += need_mb(cur)
+    return free
+
+
+def fits(eid, free_mb=None):
+    """(装得下?, 理由)。free_mb 传 None 就用实时读数（含换档释放）。"""
+    e = ENGINES.get(eid)
+    if e is None:
+        return False, "没有这个档：%s" % eid
+    if RES.key == eid and RES.session is not None:
+        return True, "已经在显存里（%d MiB）" % e["vram_mb"]
+    free = free_after_switch(eid) if free_mb is None else int(free_mb)
+    need = need_mb(eid)
+    if free < 0:
+        return True, "查不到显存读数，照装（装完日志会写实际占用）"
+    if free < need + vram.RESERVE_MB:
+        return False, ("装不下 %s：要 %d MiB（模型 %d + 运行库/上下文 %d），加 %d MiB 余量共 %d MiB；"
+                       "现在只空 %d MiB。先关 VRChat/壁纸，或改选 sv（0 显存）%s。"
+                       % (eid, need, e["vram_mb"], e.get("overhead_mb", 0), vram.RESERVE_MB,
+                          need + vram.RESERVE_MB, free,
+                          "／qwen06（%d MiB）" % need_mb("qwen06") if eid == "qwen17" else ""))
+    return True, "装得下（需 %d MiB，空 %d MiB）" % (need, free)
 
 
 def native_dir() -> str:
@@ -97,6 +142,10 @@ def _env_setup() -> bool:
          而我们是把轮子直接摊进 .pylibs 的，没有 dist-info 就没有 entry point，
          于是报 'could not locate the native transcribe library'。
          用 TRANSCRIBE_LIBRARY 直接点名 dll 最稳，开发态与冻结态一个写法。
+      3. 载入贵在「一个进程里的第一次」：1.7B 实测 52 s（从磁盘读 1.4 GB + 建上下文），
+         同一进程内换走再换回来只要 4.5 s（页缓存热了）。驱动侧没有生成
+         ComputeCache 目录（试过 CUDA_CACHE_PATH 也不落盘），所以真正管用的是
+         「启动时就预热」——见 App.start() 里的 _apply_gguf(set())。
     """
     global _ready_dir
     nd = native_dir()
@@ -169,6 +218,17 @@ class Resident:
             if self.key == eid and self.session is not None:
                 return self.session, ""
             old = self.key
+            # 看门：装不下就别动。注意必须在 _drop() 之前判——旧模型一卸，
+            # 新模型又装不下，两条链就一起哑了（宁可继续用旧档跑差的，也不要没得跑）。
+            if eid in ENGINES and not (old == eid and self.session is not None):
+                _free = vram.free_mb()
+                if _free >= 0 and old and old != eid and old in ENGINES:
+                    _free += need_mb(old)          # 换档会先卸旧的，这份空间马上能复用
+                _ok, _why = fits(eid, free_mb=(_free if _free >= 0 else None))
+                if not _ok:
+                    self.err = _why
+                    util.log("拒绝载入 GGUF %s：%s" % (eid, _why), "warn", "asr.gguf")
+                    return None, _why
             if old and old != eid:
                 self._drop()
                 util.log("GGUF 切换：卸载 %s → 载入 %s" % (
@@ -200,9 +260,9 @@ class Resident:
             self.load_ms = round((time.time() - t0) * 1000.0, 1)
             self.loaded_at = time.time()
             self.n_runs = 0
-            util.log("GGUF 识别引擎就绪 %s（%s，载入 %.0f ms，显存 %.0f MiB）" % (
+            util.log("GGUF 识别引擎就绪 %s（%s，载入 %.0f ms，权重 %.0f MiB，整机%s）" % (
                 ENGINES[eid]["name"], ENGINES[eid]["backend"], self.load_ms,
-                ENGINES[eid]["vram_mb"]), "info", "asr.gguf")
+                ENGINES[eid]["vram_mb"], vram.brief()), "info", "asr.gguf")
             return self.session, ""
 
     def _snap_now(self) -> dict:
@@ -311,8 +371,13 @@ def catalog(cfg=None) -> list:
     out = []
     for eid, e in ENGINES.items():
         p = path_of(eid, cfg)
-        size = round(os.path.getsize(p) / (1024.0 * 1024.0), 1) if os.path.isfile(p) else 0
-        out.append({"id": eid, "name": e["name"], "present": bool(size), "mb": size,
-                    "vram_mb": e["vram_mb"], "backend": e["backend"],
-                    "detect": e["detect"], "note": e["note"]})
+        # present 必须按「文件在不在」判，不能按四舍五入后的 MB 判：小于 0.05 MB 的
+        # 文件会被 round 成 0.0，然后被当成「没下载」（模型都是几百 MB，但别留这种坑）。
+        have = os.path.isfile(p)
+        size = round(os.path.getsize(p) / (1024.0 * 1024.0), 1) if have else 0
+        ok, why = fits(eid) if have else (False, "模型文件没下载")
+        out.append({"id": eid, "name": e["name"], "present": bool(have), "mb": size,
+                    "vram_mb": e["vram_mb"], "need_mb": need_mb(eid),
+                    "backend": e["backend"], "detect": e["detect"], "note": e["note"],
+                    "fits": bool(ok), "why": why})
     return out

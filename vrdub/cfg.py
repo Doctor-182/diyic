@@ -500,7 +500,7 @@ def clamp_cfg(d: dict) -> dict:
     d["chatbox_budget"] = max(0.5, min(20.0, float(d.get("chatbox_budget", 5.0))))
     d["a_cloud_wait"] = max(0.0, min(5.0, float(d.get("a_cloud_wait", 1.0))))
     for k in ("asr_engine", "asr_engine_a", "asr_engine_b"):
-        if d.get(k) not in ("hybrid", "local", "cloud", "qwen17", "qwen06", "fun"):
+        if d.get(k) not in ("hybrid", "local", "cloud", "sv", "qwen17", "qwen06", "fun"):
             d[k] = DEFAULTS[k]
     d["asr_gguf_dir"] = str(d.get("asr_gguf_dir") or "").strip()[:260]
     if d.get("asr_gguf_backend") not in ("cuda", "vulkan", "cpu"):
